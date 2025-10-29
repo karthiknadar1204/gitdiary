@@ -181,7 +181,7 @@ export default function DashboardDetail() {
                       <div className="w-3" />
                     )}
                     <Folder className="h-4 w-4 shrink-0" />
-                    <span className="text-sm truncate">{entry.name}</span>
+                    <span className="text-base truncate">{entry.name}</span>
                   </div>
                   {hasChildren && isExpanded && (
                     <div className="ml-4">
@@ -193,7 +193,7 @@ export default function DashboardDetail() {
                 <div className="flex items-center gap-1 py-1 px-2 hover:bg-accent rounded cursor-pointer">
                   <div className="w-3" />
                   <File className="h-4 w-4 shrink-0" />
-                  <span className="text-sm truncate">{entry.name}</span>
+                  <span className="text-base truncate">{entry.name}</span>
                 </div>
               )}
             </div>
@@ -207,7 +207,7 @@ export default function DashboardDetail() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border">
-        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="w-full h-16 flex items-center justify-between px-6">
           <button
             onClick={() => router.push('/dashboard')}
             className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
@@ -217,9 +217,14 @@ export default function DashboardDetail() {
           <div className="flex items-center gap-2">
             <span className="text-xl font-semibold">Git Diary</span>
           </div>
-          <div className="text-sm text-muted-foreground">
+          <a
+            href={repo.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+          >
             {repo.url}
-          </div>
+          </a>
         </div>
       </header>
 
@@ -234,7 +239,7 @@ export default function DashboardDetail() {
               onValueChange={handleBranchChange}
               disabled={syncing}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select branch" />
               </SelectTrigger>
               <SelectContent>
