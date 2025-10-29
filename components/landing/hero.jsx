@@ -3,23 +3,25 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sparkles, FileCode, GitCommit } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { addRepository } from "@/utils/addRepository";
 
 export function Hero() {
   const router = useRouter();
   const [repoUrl, setRepoUrl] = useState("");
 
-  const handleGetStarted = () => {
+  const handleAnalyze = async () => {
+    if (!repoUrl) return;
+    
+    const result = await addRepository(repoUrl);
+    if (result.error) {
+      console.error(result.error);
+      return;
+    }
+    
     router.push("/dashboard");
   };
-
-  useEffect(() => {
-    const githubUrlPattern = /^https?:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+/;
-    if (repoUrl && githubUrlPattern.test(repoUrl)) {
-      router.push("/dashboard");
-    }
-  }, [repoUrl, router]);
 
   return (
     <section className="container mx-auto px-6 py-20">
@@ -47,7 +49,7 @@ export function Hero() {
             className="flex-1 h-12 bg-card border-border"
           />
           <Button 
-            onClick={handleGetStarted}
+            onClick={handleAnalyze}
             size="lg"
             className="h-12 px-8"
           >
