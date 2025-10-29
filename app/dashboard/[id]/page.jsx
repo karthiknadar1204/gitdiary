@@ -8,7 +8,9 @@ import { syncFileCommits, getCommitsForFile, getCommitDetailsWithRelations } fro
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Button } from '@/components/ui/button';
-import { Folder, File, ChevronRight, ChevronDown, GitPullRequest, Bug, Check, ChevronsUpDown } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Folder, File, ChevronRight, ChevronDown, GitPullRequest, Bug, Check, ChevronsUpDown, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function DashboardDetail() {
@@ -32,6 +34,14 @@ export default function DashboardDetail() {
   const [branchOpen, setBranchOpen] = useState(false);
   const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const [visibleBranchCount, setVisibleBranchCount] = useState(50);
+  
+  // Filter states
+  const [filterType, setFilterType] = useState('all'); // 'all', 'lastN', 'dateRange', 'hashRange'
+  const [lastNValue, setLastNValue] = useState(50);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [hashFrom, setHashFrom] = useState('');
+  const [hashTo, setHashTo] = useState('');
 
   // Load repo and branches on mount
   useEffect(() => {
@@ -143,6 +153,14 @@ export default function DashboardDetail() {
     setSelectedFile(filePath);
     setLoadingCommits(true);
     setCommits([]);
+    
+    // Reset filter when file changes
+    setFilterType('all');
+    setLastNValue(50);
+    setDateFrom('');
+    setDateTo('');
+    setHashFrom('');
+    setHashTo('');
 
     try {
       const result = await syncFileCommits(
@@ -176,6 +194,48 @@ export default function DashboardDetail() {
 
   // Build file tree structure - memoized to prevent infinite loops
   // MUST be called before conditional returns to maintain hook order
+  // Filter commits based on selected filter
+  const filteredCommits = useMemo(() => {
+    if (!commits || commits.length === 0) return [];
+    if (filterType === 'all') return commits;
+    
+    let filtered = [...commits];
+    
+    if (filterType === 'lastN') {
+      filtered = commits.slice(0, lastNValue);
+    } else if (filterType === 'dateRange') {
+      if (dateFrom || dateTo) {
+        filtered = commits.filter(commit => {
+          if (!commit.date) return false;
+          const commitDate = new Date(commit.date);
+          const from = dateFrom ? new Date(dateFrom) : null;
+          const to = dateTo ? new Date(dateTo) : null;
+          
+          if (from && commitDate < from) return false;
+          if (to && commitDate > to) return false;
+          return true;
+        });
+      }
+    } else if (filterType === 'hashRange') {
+      if (hashFrom || hashTo) {
+        const fromIndex = hashFrom ? commits.findIndex(c => c.sha.startsWith(hashFrom)) : -1;
+        const toIndex = hashTo ? commits.findIndex(c => c.sha.startsWith(hashTo)) : -1;
+        
+        if (fromIndex !== -1 && toIndex !== -1) {
+          const start = Math.min(fromIndex, toIndex);
+          const end = Math.max(fromIndex, toIndex);
+          filtered = commits.slice(start, end + 1);
+        } else if (fromIndex !== -1) {
+          filtered = commits.slice(fromIndex);
+        } else if (toIndex !== -1) {
+          filtered = commits.slice(0, toIndex + 1);
+        }
+      }
+    }
+    
+    return filtered;
+  }, [commits, filterType, lastNValue, dateFrom, dateTo, hashFrom, hashTo]);
+
   const fileTree = useMemo(() => {
     if (!files || files.length === 0) return {};
     
@@ -430,13 +490,113 @@ export default function DashboardDetail() {
           ) : (
             <div className="p-8">
               <h2 className="text-2xl font-bold mb-4">Commit History: {selectedFile}</h2>
+              
+              {/* Filter Bar */}
+              {!loadingCommits && commits.length > 0 && (
+                <div className="mb-6 p-4 border border-border rounded-lg bg-card">
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Filter:</span>
+                      <Select value={filterType} onValueChange={setFilterType}>
+                        <SelectTrigger className="w-[140px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All commits</SelectItem>
+                          <SelectItem value="lastN">Last N commits</SelectItem>
+                          <SelectItem value="dateRange">Date range</SelectItem>
+                          <SelectItem value="hashRange">Hash range</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {filterType === 'lastN' && (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={lastNValue}
+                          onChange={(e) => setLastNValue(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-20"
+                          placeholder="10"
+                        />
+                        <span className="text-sm text-muted-foreground">commits</span>
+                      </div>
+                    )}
+
+                    {filterType === 'dateRange' && (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className="w-40"
+                        />
+                        <span className="text-sm text-muted-foreground">to</span>
+                        <Input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className="w-40"
+                        />
+                      </div>
+                    )}
+
+                    {filterType === 'hashRange' && (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="text"
+                          value={hashFrom}
+                          onChange={(e) => setHashFrom(e.target.value)}
+                          className="w-32 font-mono text-xs"
+                          placeholder="From hash"
+                        />
+                        <span className="text-sm text-muted-foreground">to</span>
+                        <Input
+                          type="text"
+                          value={hashTo}
+                          onChange={(e) => setHashTo(e.target.value)}
+                          className="w-32 font-mono text-xs"
+                          placeholder="To hash"
+                        />
+                      </div>
+                    )}
+
+                    {filterType !== 'all' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setFilterType('all');
+                          setLastNValue(50);
+                          setDateFrom('');
+                          setDateTo('');
+                          setHashFrom('');
+                          setHashTo('');
+                        }}
+                        className="h-8"
+                      >
+                        <X className="h-3 w-3 mr-1" />
+                        Clear
+                      </Button>
+                    )}
+
+                    <div className="ml-auto text-sm text-muted-foreground">
+                      Showing <span className="font-medium text-foreground">{filteredCommits.length}</span> of {commits.length} commits
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {loadingCommits ? (
                 <div className="text-muted-foreground">Loading commits...</div>
               ) : commits.length === 0 ? (
                 <div className="text-muted-foreground">No commits found for this file.</div>
+              ) : filteredCommits.length === 0 ? (
+                <div className="text-muted-foreground">No commits match the selected filter.</div>
               ) : (
                 <div className="space-y-4">
-                  {commits.map((commit) => {
+                  {filteredCommits.map((commit) => {
                     const isExpanded = expandedCommits.has(commit.id);
                     const details = commitDetails[commit.id];
 
