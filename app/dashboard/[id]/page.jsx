@@ -10,6 +10,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { Folder, File, ChevronRight, ChevronDown, GitPullRequest, Bug, Check, ChevronsUpDown, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -372,9 +373,10 @@ export default function DashboardDetail() {
       </header>
 
       {/* Three Column Layout */}
-      <div className="flex h-[calc(100vh-4rem)]">
+      <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-4rem)]">
         {/* Left Panel - Files */}
-        <div className="w-64 border-r border-border bg-card overflow-y-auto">
+        <ResizablePanel defaultSize={20} minSize={15} maxSize={40} className="border-r border-border bg-card">
+          <div className="h-full overflow-y-auto">
           <div className="p-4 border-b border-border">
             <h2 className="text-sm font-semibold mb-3">FILES</h2>
             <Popover open={branchOpen} onOpenChange={setBranchOpen}>
@@ -478,10 +480,14 @@ export default function DashboardDetail() {
               renderFileTree(fileTree)
             )}
           </div>
-        </div>
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
 
         {/* Middle Panel - Main Content */}
-        <div className="flex-1 overflow-y-auto">
+        <ResizablePanel defaultSize={55} minSize={30}>
+          <div className="h-full overflow-y-auto">
           {!selectedFile ? (
             <div className="p-8">
               <h2 className="text-2xl font-bold mb-2">Select a file to view history</h2>
@@ -783,24 +789,29 @@ export default function DashboardDetail() {
               )}
             </div>
           )}
-        </div>
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
 
         {/* Right Panel - AI Copilot */}
-        <div className="w-80 border-l border-border bg-card overflow-y-auto">
-          <div className="p-4 border-b border-border">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              ✨ AI Copilot
-            </h2>
+        <ResizablePanel defaultSize={25} minSize={15} maxSize={40} className="border-l border-border bg-card">
+          <div className="h-full overflow-y-auto">
+            <div className="p-4 border-b border-border">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                ✨ AI Copilot
+              </h2>
+            </div>
+            <div className="p-8 flex flex-col items-center justify-center h-full">
+              <div className="text-4xl mb-4">✨</div>
+              <p className="text-sm font-medium mb-2">Select commits to analyze</p>
+              <p className="text-xs text-muted-foreground text-center">
+                Select commits from the timeline to get AI-powered analysis.
+              </p>
+            </div>
           </div>
-          <div className="p-8 flex flex-col items-center justify-center h-full">
-            <div className="text-4xl mb-4">✨</div>
-            <p className="text-sm font-medium mb-2">Select commits to analyze</p>
-            <p className="text-xs text-muted-foreground text-center">
-              Select commits from the timeline to get AI-powered analysis.
-            </p>
-          </div>
-        </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
