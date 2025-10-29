@@ -19,14 +19,17 @@ export const repos = pgTable("repos", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const files = pgTable("files", {
+// Branches - track branches per repo
+export const branches = pgTable("branches", {
   id: serial("id").primaryKey(),
   repoId: integer("repo_id").references(() => repos.id).notNull(),
-  path: varchar("path").notNull(),
-  type: varchar("type").notNull(),
+  name: varchar("name").notNull(),   // e.g. "main", "dev", "feature/auth"
+  commitSha: varchar("commit_sha"), // HEAD commit SHA on this branch
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Commits - repo-level, shared across branches (same commit can exist in multiple branches)
 export const commits = pgTable("commits", {
   id: serial("id").primaryKey(),
   repoId: integer("repo_id").references(() => repos.id).notNull(),
@@ -36,7 +39,25 @@ export const commits = pgTable("commits", {
   authorEmail: varchar("author_email"),
   date: timestamp("date"),
   filesChanged: jsonb("files_changed"),
+  parentSha: varchar("parent_sha"), // for building commit history
 });
+
+// Files - branch-specific snapshot of files at that branch's current state
+export const files = pgTable("files", {
+  id: serial("id").primaryKey(),
+  branchId: integer("branch_id").references(() => branches.id).notNull(),
+  path: varchar("path").notNull(),
+  type: varchar("type").notNull(),  // file or folder
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Commit ↔ Branch relation (many-to-many: commit can be in multiple branches)
+export const commitToBranch = pgTable("commit_to_branch", {
+  commitId: integer("commit_id").references(() => commits.id).notNull(),
+  branchId: integer("branch_id").references(() => branches.id).notNull(),
+}, (t) => ({
+  pk: primaryKey(t.commitId, t.branchId)
+}));
 
 export const pullRequests = pgTable("pull_requests", {
   id: serial("id").primaryKey(),
