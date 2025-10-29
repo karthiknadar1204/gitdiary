@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sparkles, FileCode, GitCommit } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export function Hero() {
@@ -13,6 +13,13 @@ export function Hero() {
   const handleGetStarted = () => {
     router.push("/dashboard");
   };
+
+  useEffect(() => {
+    const githubUrlPattern = /^https?:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+/;
+    if (repoUrl && githubUrlPattern.test(repoUrl)) {
+      router.push("/dashboard");
+    }
+  }, [repoUrl, router]);
 
   return (
     <section className="container mx-auto px-6 py-20">
