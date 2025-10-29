@@ -5,6 +5,71 @@ import { db } from '@/config/db';
 import { commits, pullRequests, issues, commitToPR, commitToBranch, prToIssue, repos } from '@/config/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 
+// Retry helper with exponential backoff
+async function fetchWithRetry(url, options, maxRetries = 3, timeout = 30000) {
+  let timeoutId;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const controller = new AbortController();
+    
+    try {
+      timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        // Don't retry on most client errors (4xx), only retry on server errors (5xx)
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          const errorText = await response.text().catch(() => '');
+          return { error: `HTTP ${response.status}: ${errorText}`, response: null };
+        }
+        
+        // Retry on 429 (rate limit) and 5xx errors
+        if (attempt < maxRetries - 1) {
+          // For rate limiting, wait longer
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After');
+            const delay = retryAfter ? parseInt(retryAfter) * 1000 : Math.min(1000 * Math.pow(2, attempt), 10000);
+            await response.text().catch(() => {}); // Consume response body
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          // For other 5xx errors, use exponential backoff
+          await response.text().catch(() => {}); // Consume response body
+          const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        
+        const errorText = await response.text().catch(() => '');
+        return { error: `HTTP ${response.status}: ${errorText}`, response: null };
+      }
+
+      return { response, error: null };
+    } catch (error) {
+      if (timeoutId) clearTimeout(timeoutId);
+      
+      // Last attempt
+      if (attempt === maxRetries - 1) {
+        return { 
+          error: error.name === 'AbortError' ? 'Request timeout after 30s' : error.message,
+          response: null
+        };
+      }
+
+      // Exponential backoff: wait 1s, 2s, 4s (max 5s)
+      const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  return { error: 'Max retries exceeded', response: null };
+}
+
 export async function fetchCommitsForFile(owner, repoName, filePath, branchName) {
   try {
     const githubToken = process.env.GITHUB_TOKEN;
@@ -12,23 +77,20 @@ export async function fetchCommitsForFile(owner, repoName, filePath, branchName)
       return { error: 'GitHub token not configured' };
     }
 
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repoName}/commits?path=${encodeURIComponent(filePath)}&sha=${branchName}`,
-      {
-        headers: {
-          'Authorization': `token ${githubToken}`,
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      }
-    );
+    const url = `https://api.github.com/repos/${owner}/${repoName}/commits?path=${encodeURIComponent(filePath)}&sha=${branchName}&per_page=100`;
+    const result = await fetchWithRetry(url, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('GitHub API Error:', response.status, errorText);
-      return { error: `Failed to fetch commits: ${response.status}` };
+    if (result.error) {
+      console.error('GitHub API Error fetching commits:', result.error);
+      return { error: `Failed to fetch commits: ${result.error}` };
     }
 
-    const commitsData = await response.json();
+    const commitsData = await result.response.json();
     return { commits: commitsData };
   } catch (error) {
     console.error('Error fetching commits:', error);
@@ -43,23 +105,20 @@ export async function fetchCommitDetails(owner, repoName, sha) {
       return { error: 'GitHub token not configured' };
     }
 
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}`,
-      {
-        headers: {
-          'Authorization': `token ${githubToken}`,
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      }
-    );
+    const url = `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}`;
+    const result = await fetchWithRetry(url, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('GitHub API Error:', response.status, errorText);
-      return { error: `Failed to fetch commit details: ${response.status}` };
+    if (result.error) {
+      console.error('GitHub API Error fetching commit details:', result.error);
+      return { error: `Failed to fetch commit details: ${result.error}` };
     }
 
-    const commitData = await response.json();
+    const commitData = await result.response.json();
     return { commit: commitData };
   } catch (error) {
     console.error('Error fetching commit details:', error);
@@ -74,27 +133,24 @@ export async function fetchPRsForCommit(owner, repoName, sha) {
       return { error: 'GitHub token not configured' };
     }
 
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}/pulls`,
-      {
-        headers: {
-          'Authorization': `token ${githubToken}`,
-          'Accept': 'application/vnd.github.groot-preview+json',
-        },
-      }
-    );
+    const url = `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}/pulls`;
+    const result = await fetchWithRetry(url, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github.groot-preview+json',
+      },
+    });
 
-    if (!response.ok) {
+    if (result.error) {
       // 404 means no PRs for this commit, which is fine
-      if (response.status === 404) {
+      if (result.error.includes('404')) {
         return { prs: [] };
       }
-      const errorText = await response.text();
-      console.error('GitHub API Error:', response.status, errorText);
-      return { error: `Failed to fetch PRs: ${response.status}` };
+      console.error('GitHub API Error fetching PRs:', result.error);
+      return { error: `Failed to fetch PRs: ${result.error}` };
     }
 
-    const prsData = await response.json();
+    const prsData = await result.response.json();
     return { prs: prsData };
   } catch (error) {
     console.error('Error fetching PRs:', error);
@@ -109,23 +165,20 @@ export async function fetchPRDetails(owner, repoName, prNumber) {
       return { error: 'GitHub token not configured' };
     }
 
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repoName}/pulls/${prNumber}`,
-      {
-        headers: {
-          'Authorization': `token ${githubToken}`,
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      }
-    );
+    const url = `https://api.github.com/repos/${owner}/${repoName}/pulls/${prNumber}`;
+    const result = await fetchWithRetry(url, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('GitHub API Error:', response.status, errorText);
-      return { error: `Failed to fetch PR details: ${response.status}` };
+    if (result.error) {
+      console.error('GitHub API Error fetching PR details:', result.error);
+      return { error: `Failed to fetch PR details: ${result.error}` };
     }
 
-    const prData = await response.json();
+    const prData = await result.response.json();
     return { pr: prData };
   } catch (error) {
     console.error('Error fetching PR details:', error);
@@ -140,23 +193,20 @@ export async function fetchIssueDetails(owner, repoName, issueNumber) {
       return { error: 'GitHub token not configured' };
     }
 
-    const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repoName}/issues/${issueNumber}`,
-      {
-        headers: {
-          'Authorization': `token ${githubToken}`,
-          'Accept': 'application/vnd.github.v3+json',
-        },
-      }
-    );
+    const url = `https://api.github.com/repos/${owner}/${repoName}/issues/${issueNumber}`;
+    const result = await fetchWithRetry(url, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('GitHub API Error:', response.status, errorText);
-      return { error: `Failed to fetch issue details: ${response.status}` };
+    if (result.error) {
+      console.error('GitHub API Error fetching issue details:', result.error);
+      return { error: `Failed to fetch issue details: ${result.error}` };
     }
 
-    const issueData = await response.json();
+    const issueData = await result.response.json();
     return { issue: issueData };
   } catch (error) {
     console.error('Error fetching issue details:', error);

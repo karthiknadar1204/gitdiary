@@ -375,9 +375,8 @@ export default function DashboardDetail() {
       {/* Three Column Layout */}
       <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-4rem)]">
         {/* Left Panel - Files */}
-        <ResizablePanel defaultSize={20} minSize={15} maxSize={40} className="border-r border-border bg-card">
-          <div className="h-full overflow-y-auto">
-          <div className="p-4 border-b border-border">
+        <ResizablePanel defaultSize={20} minSize={15} maxSize={40} className="border-r border-border bg-card flex flex-col min-h-0">
+          <div className="p-4 border-b border-border flex-shrink-0">
             <h2 className="text-sm font-semibold mb-3">FILES</h2>
             <Popover open={branchOpen} onOpenChange={setBranchOpen}>
               <PopoverTrigger asChild>
@@ -471,15 +470,16 @@ export default function DashboardDetail() {
               </PopoverContent>
             </Popover>
           </div>
-          <div className="p-4">
-            {syncing ? (
-              <div className="text-sm text-muted-foreground">Loading files...</div>
-            ) : files.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No files found</div>
-            ) : (
-              renderFileTree(fileTree)
-            )}
-          </div>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            <div className="p-4">
+              {syncing ? (
+                <div className="text-sm text-muted-foreground">Loading files...</div>
+              ) : files.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No files found</div>
+              ) : (
+                renderFileTree(fileTree)
+              )}
+            </div>
           </div>
         </ResizablePanel>
 
