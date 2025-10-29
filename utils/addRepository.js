@@ -13,8 +13,7 @@ export async function addRepository(repoUrl) {
       return { error: 'Unauthorized' };
     }
 
-    // Extract owner and repo name from URL (handle various formats)
-    const cleanUrl = repoUrl.trim().replace(/\/$/, ''); // Remove trailing slash
+    const cleanUrl = repoUrl.trim().replace(/\/$/, '');
     const match = cleanUrl.match(/github\.com\/([\w\-\.]+)\/([\w\-\.]+)(?:\/|$)/);
     if (!match) {
       return { error: 'Invalid GitHub URL' };
@@ -22,20 +21,17 @@ export async function addRepository(repoUrl) {
 
     const [, owner, name] = match;
 
-    // Get user from database
     const [user] = await db.select().from(users).where(eq(users.clerkId, userId)).limit(1);
     if (!user) {
       return { error: 'User not found' };
     }
 
-    // Fetch repo details from GitHub API
     const githubToken = process.env.GITHUB_TOKEN;
     if (!githubToken) {
       console.error('GITHUB_TOKEN is not set in environment variables');
       return { error: 'GitHub token not configured' };
     }
 
-    console.log('Fetching repo:', owner, name);
     const response = await fetch(`https://api.github.com/repos/${owner}/${name}`, {
       headers: {
         'Authorization': `token ${githubToken}`,
@@ -51,7 +47,6 @@ export async function addRepository(repoUrl) {
 
     const repoData = await response.json();
 
-    // Check if repo already exists for this user
     const existingRepo = await db.select()
       .from(repos)
       .where(and(eq(repos.url, cleanUrl), eq(repos.userId, user.id)))
@@ -61,7 +56,6 @@ export async function addRepository(repoUrl) {
       return { repo: existingRepo[0], created: false };
     }
 
-    // Insert new repo
     const [newRepo] = await db.insert(repos).values({
       userId: user.id,
       owner: repoData.owner.login,

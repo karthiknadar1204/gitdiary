@@ -63,20 +63,17 @@ export async function syncBranches(repoId, owner, repoName) {
       return { error: 'Unauthorized' };
     }
 
-    // Fetch branches from GitHub
     const result = await fetchBranchesFromGitHub(owner, repoName);
     if (result.error) {
       return result;
     }
 
-    // Store branches in database
     const branchesToInsert = result.branches.map(branch => ({
       repoId,
       name: branch.name,
       commitSha: branch.commit.sha,
     }));
 
-    // Insert or update branches
     for (const branch of branchesToInsert) {
       const existing = await db.select()
         .from(branches)
@@ -92,7 +89,6 @@ export async function syncBranches(repoId, owner, repoName) {
       }
     }
 
-    // Return branches from DB
     const dbBranches = await db.select()
       .from(branches)
       .where(eq(branches.repoId, repoId));

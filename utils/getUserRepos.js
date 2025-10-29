@@ -13,13 +13,11 @@ export async function getUserRepos() {
       return { error: 'Unauthorized' };
     }
 
-    // Get user from database
     const [user] = await db.select().from(users).where(eq(users.clerkId, userId)).limit(1);
     if (!user) {
       return { error: 'User not found' };
     }
 
-    // Get all repos for this user
     const userRepos = await db.select()
       .from(repos)
       .where(eq(repos.userId, user.id));

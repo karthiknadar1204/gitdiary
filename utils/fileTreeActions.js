@@ -40,19 +40,15 @@ export async function syncFileTree(repoId, branchId, owner, repoName, branchName
       return { error: 'Unauthorized' };
     }
 
-    // Fetch file tree from GitHub
     const result = await fetchFileTreeFromGitHub(owner, repoName, branchName);
     if (result.error) {
       return result;
     }
 
-    // Delete existing files for this branch
     await db.delete(files).where(eq(files.branchId, branchId));
 
-    // Process tree data and store files
     const filesToInsert = result.tree.tree
       .filter(item => {
-        // Filter out node_modules
         if (item.path.includes('node_modules/') || item.path === 'node_modules') {
           return false;
         }
@@ -68,12 +64,10 @@ export async function syncFileTree(repoId, branchId, owner, repoName, branchName
       await db.insert(files).values(filesToInsert);
     }
 
-    // Return files from DB
     const dbFiles = await db.select()
       .from(files)
       .where(eq(files.branchId, branchId));
 
-    // Sort files by path
     dbFiles.sort((a, b) => a.path.localeCompare(b.path));
 
     return { files: dbFiles };
@@ -89,7 +83,6 @@ export async function getFilesForBranch(branchId) {
       .from(files)
       .where(eq(files.branchId, branchId));
 
-    // Sort files by path
     filesList.sort((a, b) => a.path.localeCompare(b.path));
 
     return { files: filesList };
