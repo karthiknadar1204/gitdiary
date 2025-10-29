@@ -1,0 +1,494 @@
+'use server';
+
+import { auth } from '@clerk/nextjs/server';
+import { db } from '@/config/db';
+import { commits, pullRequests, issues, commitToPR, commitToBranch, prToIssue } from '@/config/schema';
+import { eq, and, inArray } from 'drizzle-orm';
+
+export async function fetchCommitsForFile(owner, repoName, filePath, branchName) {
+  try {
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      return { error: 'GitHub token not configured' };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/commits?path=${encodeURIComponent(filePath)}&sha=${branchName}`,
+      {
+        headers: {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('GitHub API Error:', response.status, errorText);
+      return { error: `Failed to fetch commits: ${response.status}` };
+    }
+
+    const commitsData = await response.json();
+    return { commits: commitsData };
+  } catch (error) {
+    console.error('Error fetching commits:', error);
+    return { error: 'Failed to fetch commits' };
+  }
+}
+
+export async function fetchCommitDetails(owner, repoName, sha) {
+  try {
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      return { error: 'GitHub token not configured' };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}`,
+      {
+        headers: {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('GitHub API Error:', response.status, errorText);
+      return { error: `Failed to fetch commit details: ${response.status}` };
+    }
+
+    const commitData = await response.json();
+    return { commit: commitData };
+  } catch (error) {
+    console.error('Error fetching commit details:', error);
+    return { error: 'Failed to fetch commit details' };
+  }
+}
+
+export async function fetchPRsForCommit(owner, repoName, sha) {
+  try {
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      return { error: 'GitHub token not configured' };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/commits/${sha}/pulls`,
+      {
+        headers: {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.groot-preview+json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      // 404 means no PRs for this commit, which is fine
+      if (response.status === 404) {
+        return { prs: [] };
+      }
+      const errorText = await response.text();
+      console.error('GitHub API Error:', response.status, errorText);
+      return { error: `Failed to fetch PRs: ${response.status}` };
+    }
+
+    const prsData = await response.json();
+    return { prs: prsData };
+  } catch (error) {
+    console.error('Error fetching PRs:', error);
+    return { error: 'Failed to fetch PRs' };
+  }
+}
+
+export async function fetchPRDetails(owner, repoName, prNumber) {
+  try {
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      return { error: 'GitHub token not configured' };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/pulls/${prNumber}`,
+      {
+        headers: {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('GitHub API Error:', response.status, errorText);
+      return { error: `Failed to fetch PR details: ${response.status}` };
+    }
+
+    const prData = await response.json();
+    return { pr: prData };
+  } catch (error) {
+    console.error('Error fetching PR details:', error);
+    return { error: 'Failed to fetch PR details' };
+  }
+}
+
+export async function fetchIssueDetails(owner, repoName, issueNumber) {
+  try {
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      return { error: 'GitHub token not configured' };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/issues/${issueNumber}`,
+      {
+        headers: {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('GitHub API Error:', response.status, errorText);
+      return { error: `Failed to fetch issue details: ${response.status}` };
+    }
+
+    const issueData = await response.json();
+    return { issue: issueData };
+  } catch (error) {
+    console.error('Error fetching issue details:', error);
+    return { error: 'Failed to fetch issue details' };
+  }
+}
+
+// Parse PR body for issue references (#123 format)
+function parseIssueReferences(prBody) {
+  if (!prBody) return [];
+  const issueRegex = /#(\d+)/g;
+  const matches = prBody.matchAll(issueRegex);
+  const issueNumbers = [...matches].map(match => parseInt(match[1]));
+  return [...new Set(issueNumbers)]; // Remove duplicates
+}
+
+export async function syncFileCommits(repoId, branchId, owner, repoName, branchName, filePath) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { error: 'Unauthorized' };
+    }
+
+    // Step 1: Get commits for file (Call C)
+    const commitsResult = await fetchCommitsForFile(owner, repoName, filePath, branchName);
+    if (commitsResult.error) {
+      return commitsResult;
+    }
+
+    const commitsData = commitsResult.commits || [];
+    const processedCommits = [];
+
+    // Step 2: For each commit, get details and PRs
+    for (const commitInfo of commitsData) {
+      const sha = commitInfo.sha;
+
+      // Check if commit already exists in DB
+      const [existingCommit] = await db.select()
+        .from(commits)
+        .where(eq(commits.sha, sha))
+        .limit(1);
+
+      let commitId;
+
+      if (existingCommit) {
+        commitId = existingCommit.id;
+      } else {
+        // Step 2a: Get commit details with diffs (Call D)
+        const commitDetailsResult = await fetchCommitDetails(owner, repoName, sha);
+        if (commitDetailsResult.error) {
+          console.error(`Error fetching commit ${sha}:`, commitDetailsResult.error);
+          continue;
+        }
+
+        const commitData = commitDetailsResult.commit;
+
+        // Extract filesChanged data
+        const filesChanged = commitData.files?.map(file => ({
+          filename: file.filename,
+          additions: file.additions,
+          deletions: file.deletions,
+          changes: file.changes,
+          patch: file.patch,
+        })) || [];
+
+        // Store commit in DB
+        const [newCommit] = await db.insert(commits).values({
+          repoId,
+          sha: commitData.sha,
+          message: commitData.commit.message,
+          authorName: commitData.commit.author.name,
+          authorEmail: commitData.commit.author.email,
+          date: new Date(commitData.commit.author.date),
+          filesChanged: filesChanged,
+          parentSha: commitData.parents?.[0]?.sha || null,
+        }).returning();
+
+        commitId = newCommit.id;
+      }
+
+      // Link commit to branch
+      const [existingLink] = await db.select()
+        .from(commitToBranch)
+        .where(and(eq(commitToBranch.commitId, commitId), eq(commitToBranch.branchId, branchId)))
+        .limit(1);
+
+      if (!existingLink) {
+        await db.insert(commitToBranch).values({
+          commitId,
+          branchId,
+        });
+      }
+
+      // Step 2b: Get PRs for commit (Call E)
+      const prsResult = await fetchPRsForCommit(owner, repoName, sha);
+      if (prsResult.error) {
+        console.error(`Error fetching PRs for commit ${sha}:`, prsResult.error);
+        // Continue even if PR fetch fails
+      } else {
+        const prs = prsResult.prs || [];
+
+        for (const prInfo of prs) {
+          const prNumber = prInfo.number;
+
+          // Check if PR already exists
+          const [existingPR] = await db.select()
+            .from(pullRequests)
+            .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, prNumber)))
+            .limit(1);
+
+          let prId;
+
+          if (existingPR) {
+            prId = existingPR.id;
+          } else {
+            // Step 2c: Get PR details (Call F)
+            const prDetailsResult = await fetchPRDetails(owner, repoName, prNumber);
+            if (prDetailsResult.error) {
+              console.error(`Error fetching PR ${prNumber}:`, prDetailsResult.error);
+              continue;
+            }
+
+            const prData = prDetailsResult.pr;
+
+            // Store PR in DB
+            const [newPR] = await db.insert(pullRequests).values({
+              repoId,
+              number: prData.number,
+              title: prData.title,
+              body: prData.body,
+              state: prData.state,
+              createdAt: prData.created_at ? new Date(prData.created_at) : null,
+              mergedAt: prData.merged_at ? new Date(prData.merged_at) : null,
+            }).returning();
+
+            prId = newPR.id;
+
+            // Step 2d: Parse PR body for issues (Call G)
+            const issueNumbers = parseIssueReferences(prData.body);
+            for (const issueNumber of issueNumbers) {
+              // Check if issue already exists
+              const [existingIssue] = await db.select()
+                .from(issues)
+                .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
+                .limit(1);
+
+              let issueId;
+
+              if (existingIssue) {
+                issueId = existingIssue.id;
+              } else {
+                // Fetch issue details
+                const issueDetailsResult = await fetchIssueDetails(owner, repoName, issueNumber);
+                if (issueDetailsResult.error) {
+                  console.error(`Error fetching issue ${issueNumber}:`, issueDetailsResult.error);
+                  continue;
+                }
+
+                const issueData = issueDetailsResult.issue;
+
+                // Store issue in DB
+                const [newIssue] = await db.insert(issues).values({
+                  repoId,
+                  number: issueData.number,
+                  title: issueData.title,
+                  body: issueData.body,
+                  state: issueData.state,
+                  createdAt: issueData.created_at ? new Date(issueData.created_at) : null,
+                  closedAt: issueData.closed_at ? new Date(issueData.closed_at) : null,
+                }).returning();
+
+                issueId = newIssue.id;
+              }
+
+              // Link PR to Issue
+              const [existingPRIssueLink] = await db.select()
+                .from(prToIssue)
+                .where(and(eq(prToIssue.prId, prId), eq(prToIssue.issueId, issueId)))
+                .limit(1);
+
+              if (!existingPRIssueLink) {
+                await db.insert(prToIssue).values({
+                  prId,
+                  issueId,
+                });
+              }
+            }
+          }
+
+          // Link Commit to PR
+          const [existingCommitPRLink] = await db.select()
+            .from(commitToPR)
+            .where(and(eq(commitToPR.commitId, commitId), eq(commitToPR.prId, prId)))
+            .limit(1);
+
+          if (!existingCommitPRLink) {
+            await db.insert(commitToPR).values({
+              commitId,
+              prId,
+            });
+          }
+        }
+      }
+
+      processedCommits.push({
+        commitId,
+        sha: existingCommit?.sha || commitInfo.sha,
+      });
+    }
+
+    return { commits: processedCommits };
+  } catch (error) {
+    console.error('Error syncing file commits:', error);
+    return { error: 'Failed to sync file commits' };
+  }
+}
+
+export async function getCommitsForFile(repoId, branchId, filePath) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { error: 'Unauthorized' };
+    }
+
+    // Get commits linked to this branch
+    const branchCommits = await db.select({
+      commitId: commitToBranch.commitId,
+    })
+      .from(commitToBranch)
+      .where(eq(commitToBranch.branchId, branchId));
+
+    const commitIds = branchCommits.map(bc => bc.commitId);
+
+    if (commitIds.length === 0) {
+      return { commits: [] };
+    }
+
+    // Get commit details
+    const allCommits = await db.select()
+      .from(commits)
+      .where(and(
+        eq(commits.repoId, repoId),
+        inArray(commits.id, commitIds)
+      ));
+
+    // Filter commits that changed this file
+    const fileCommits = allCommits.filter(commit => {
+      if (!commit.filesChanged || !Array.isArray(commit.filesChanged)) {
+        return false;
+      }
+      return commit.filesChanged.some(file => file.filename === filePath);
+    });
+
+    // Sort by date (newest first)
+    fileCommits.sort((a, b) => {
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return { commits: fileCommits };
+  } catch (error) {
+    console.error('Error fetching commits:', error);
+    return { error: 'Failed to fetch commits' };
+  }
+}
+
+export async function getCommitDetailsWithRelations(commitId) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return { error: 'Unauthorized' };
+    }
+
+    // Get commit
+    const [commit] = await db.select()
+      .from(commits)
+      .where(eq(commits.id, commitId))
+      .limit(1);
+
+    if (!commit) {
+      return { error: 'Commit not found' };
+    }
+
+    // Get PRs linked to this commit
+    const commitPRs = await db.select({
+      prId: commitToPR.prId,
+    })
+      .from(commitToPR)
+      .where(eq(commitToPR.commitId, commitId));
+
+    const prIds = commitPRs.map(cp => cp.prId);
+
+    let prs = [];
+    if (prIds.length > 0) {
+      const prsData = await db.select()
+        .from(pullRequests)
+        .where(inArray(pullRequests.id, prIds));
+
+      // For each PR, get linked issues
+      for (const pr of prsData) {
+        const prIssues = await db.select({
+          issueId: prToIssue.issueId,
+        })
+          .from(prToIssue)
+          .where(eq(prToIssue.prId, pr.id));
+
+        const issueIds = prIssues.map(pi => pi.issueId);
+
+        let issuesList = [];
+        if (issueIds.length > 0) {
+          issuesList = await db.select()
+            .from(issues)
+            .where(inArray(issues.id, issueIds));
+        }
+
+        prs.push({
+          ...pr,
+          issues: issuesList,
+        });
+      }
+    }
+
+    return {
+      commit: {
+        ...commit,
+        prs,
+      },
+    };
+  } catch (error) {
+    console.error('Error fetching commit details:', error);
+    return { error: 'Failed to fetch commit details' };
+  }
+}
+

@@ -4,8 +4,12 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getRepoById, syncBranches, getBranchesForRepo } from '@/utils/repoActions';
 import { syncFileTree, getFilesForBranch } from '@/utils/fileTreeActions';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Folder, File, ChevronRight, ChevronDown } from 'lucide-react';
+import { syncFileCommits, getCommitsForFile, getCommitDetailsWithRelations } from '@/utils/commitActions';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Button } from '@/components/ui/button';
+import { Folder, File, ChevronRight, ChevronDown, GitPullRequest, Bug, Check, ChevronsUpDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export default function DashboardDetail() {
   const params = useParams();
@@ -20,6 +24,14 @@ export default function DashboardDetail() {
   const [syncing, setSyncing] = useState(false);
   const loadingFilesRef = useRef(false);
   const [expandedFolders, setExpandedFolders] = useState(new Set());
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [commits, setCommits] = useState([]);
+  const [loadingCommits, setLoadingCommits] = useState(false);
+  const [expandedCommits, setExpandedCommits] = useState(new Set());
+  const [commitDetails, setCommitDetails] = useState({});
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [branchSearchQuery, setBranchSearchQuery] = useState('');
+  const [visibleBranchCount, setVisibleBranchCount] = useState(50);
 
   // Load repo and branches on mount
   useEffect(() => {
@@ -32,22 +44,47 @@ export default function DashboardDetail() {
       }
       setRepo(result.repo);
 
-      // Sync branches from GitHub
-      setSyncing(true);
-      const branchesResult = await syncBranches(repoId, result.repo.owner, result.repo.name);
-      setSyncing(false);
-
-      if (branchesResult.error) {
-        console.error(branchesResult.error);
-      } else {
-        setBranches(branchesResult.branches || []);
-        // Select default branch or first branch
-        const defaultBranch = branchesResult.branches.find(b => b.name === result.repo.defaultBranch) || branchesResult.branches[0];
+      // First, load existing branches from DB to show immediately
+      const existingBranchesResult = await getBranchesForRepo(repoId);
+      if (existingBranchesResult.branches && existingBranchesResult.branches.length > 0) {
+        setBranches(existingBranchesResult.branches);
+        // Select default branch or first branch from existing
+        const defaultBranch = existingBranchesResult.branches.find(b => b.name === result.repo.defaultBranch) || existingBranchesResult.branches[0];
         if (defaultBranch) {
           setSelectedBranch(defaultBranch);
         }
+        setLoading(false);
+        
+        // Then sync branches from GitHub in background (non-blocking)
+        syncBranches(repoId, result.repo.owner, result.repo.name)
+          .then((branchesResult) => {
+            if (branchesResult.error) {
+              console.error(branchesResult.error);
+            } else {
+              setBranches(branchesResult.branches || []);
+            }
+          })
+          .catch((error) => {
+            console.error('Error syncing branches:', error);
+          });
+      } else {
+        // No existing branches, sync now but show loading state
+        setSyncing(true);
+        const branchesResult = await syncBranches(repoId, result.repo.owner, result.repo.name);
+        setSyncing(false);
+
+        if (branchesResult.error) {
+          console.error(branchesResult.error);
+        } else {
+          setBranches(branchesResult.branches || []);
+          // Select default branch or first branch
+          const defaultBranch = branchesResult.branches.find(b => b.name === result.repo.defaultBranch) || branchesResult.branches[0];
+          if (defaultBranch) {
+            setSelectedBranch(defaultBranch);
+          }
+        }
+        setLoading(false);
       }
-      setLoading(false);
     }
 
     if (repoId) {
@@ -93,6 +130,47 @@ export default function DashboardDetail() {
     if (branch) {
       setSelectedBranch(branch);
       setFiles([]); // Clear files while loading new branch
+      setSelectedFile(null); // Clear selected file
+      setCommits([]); // Clear commits
+      setBranchSearchQuery(''); // Clear search when branch is selected
+      setVisibleBranchCount(50); // Reset visible count
+    }
+  };
+
+  const handleFileClick = async (filePath) => {
+    if (!repo || !selectedBranch || filePath === selectedFile) return;
+
+    setSelectedFile(filePath);
+    setLoadingCommits(true);
+    setCommits([]);
+
+    try {
+      const result = await syncFileCommits(
+        repoId,
+        selectedBranch.id,
+        repo.owner,
+        repo.name,
+        selectedBranch.name,
+        filePath
+      );
+
+      if (result.error) {
+        console.error(result.error);
+        setLoadingCommits(false);
+        return;
+      }
+
+      // Fetch commits from DB for display
+      const commitsResult = await getCommitsForFile(repoId, selectedBranch.id, filePath);
+      if (commitsResult.error) {
+        console.error(commitsResult.error);
+      } else {
+        setCommits(commitsResult.commits || []);
+      }
+    } catch (error) {
+      console.error('Error loading commits:', error);
+    } finally {
+      setLoadingCommits(false);
     }
   };
 
@@ -190,7 +268,12 @@ export default function DashboardDetail() {
                   )}
                 </>
               ) : (
-                <div className="flex items-center gap-1 py-1 px-2 hover:bg-accent rounded cursor-pointer">
+                <div
+                  className={`flex items-center gap-1 py-1 px-2 hover:bg-accent rounded cursor-pointer ${
+                    selectedFile === entry.path ? 'bg-accent' : ''
+                  }`}
+                  onClick={() => handleFileClick(entry.path)}
+                >
                   <div className="w-3" />
                   <File className="h-4 w-4 shrink-0" />
                   <span className="text-base truncate">{entry.name}</span>
@@ -234,22 +317,97 @@ export default function DashboardDetail() {
         <div className="w-64 border-r border-border bg-card overflow-y-auto">
           <div className="p-4 border-b border-border">
             <h2 className="text-sm font-semibold mb-3">FILES</h2>
-            <Select
-              value={selectedBranch?.id?.toString()}
-              onValueChange={handleBranchChange}
-              disabled={syncing}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((branch) => (
-                  <SelectItem key={branch.id} value={branch.id.toString()}>
-                    {branch.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={branchOpen} onOpenChange={setBranchOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={branchOpen}
+                  className="w-full justify-between"
+                  disabled={syncing}
+                >
+                  {selectedBranch
+                    ? branches.find((branch) => branch.id === selectedBranch.id)?.name
+                    : "Select branch..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <Command shouldFilter={false}>
+                  <CommandInput 
+                    placeholder="Search branch..." 
+                    value={branchSearchQuery}
+                    onValueChange={(value) => {
+                      setBranchSearchQuery(value);
+                      setVisibleBranchCount(50); // Reset visible count on search
+                    }}
+                  />
+                  <CommandList 
+                    className="max-h-[300px]"
+                    onScroll={(e) => {
+                      const target = e.target;
+                      // Load more when user scrolls near bottom
+                      if (target.scrollHeight - target.scrollTop <= target.clientHeight + 100) {
+                        setVisibleBranchCount(prev => {
+                          const filteredBranches = branchSearchQuery
+                            ? branches.filter(branch =>
+                                branch.name.toLowerCase().includes(branchSearchQuery.toLowerCase())
+                              )
+                            : branches;
+                          return Math.min(prev + 50, filteredBranches.length);
+                        });
+                      }
+                    }}
+                  >
+                    <CommandEmpty>No branch found.</CommandEmpty>
+                    <CommandGroup>
+                      {(() => {
+                        // Filter branches based on search query
+                        const filteredBranches = branchSearchQuery
+                          ? branches.filter(branch =>
+                              branch.name.toLowerCase().includes(branchSearchQuery.toLowerCase())
+                            )
+                          : branches;
+
+                        // Use cursor-based pagination: show only visibleBranchCount items
+                        const displayedBranches = filteredBranches.slice(0, visibleBranchCount);
+
+                        return (
+                          <>
+                            {displayedBranches.map((branch) => (
+                              <CommandItem
+                                key={branch.id}
+                                value={branch.name}
+                                onSelect={() => {
+                                  handleBranchChange(branch.id.toString());
+                                  setBranchOpen(false);
+                                  setBranchSearchQuery('');
+                                  setVisibleBranchCount(50); // Reset on select
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    selectedBranch?.id === branch.id ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                {branch.name}
+                              </CommandItem>
+                            ))}
+                            {visibleBranchCount < filteredBranches.length && (
+                              <div className="px-2 py-1.5 text-xs text-muted-foreground text-center">
+                                Showing {visibleBranchCount} of {filteredBranches.length} branches. 
+                                Scroll to load more.
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="p-4">
             {syncing ? (
@@ -264,10 +422,207 @@ export default function DashboardDetail() {
 
         {/* Middle Panel - Main Content */}
         <div className="flex-1 overflow-y-auto">
-          <div className="p-8">
-            <h2 className="text-2xl font-bold mb-2">Select a file to view history</h2>
-            <p className="text-muted-foreground">Choose a file from the left panel.</p>
-          </div>
+          {!selectedFile ? (
+            <div className="p-8">
+              <h2 className="text-2xl font-bold mb-2">Select a file to view history</h2>
+              <p className="text-muted-foreground">Choose a file from the left panel.</p>
+            </div>
+          ) : (
+            <div className="p-8">
+              <h2 className="text-2xl font-bold mb-4">Commit History: {selectedFile}</h2>
+              {loadingCommits ? (
+                <div className="text-muted-foreground">Loading commits...</div>
+              ) : commits.length === 0 ? (
+                <div className="text-muted-foreground">No commits found for this file.</div>
+              ) : (
+                <div className="space-y-4">
+                  {commits.map((commit) => {
+                    const isExpanded = expandedCommits.has(commit.id);
+                    const details = commitDetails[commit.id];
+
+                    return (
+                      <div key={commit.id} className="border border-border rounded-lg p-4">
+                        <div
+                          className="cursor-pointer"
+                          onClick={async () => {
+                            if (isExpanded) {
+                              setExpandedCommits(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(commit.id);
+                                return newSet;
+                              });
+                            } else {
+                              setExpandedCommits(prev => new Set(prev).add(commit.id));
+                              
+                              // Fetch commit details if not already loaded
+                              if (!details) {
+                                const result = await getCommitDetailsWithRelations(commit.id);
+                                if (result.error) {
+                                  console.error(result.error);
+                                } else {
+                                  setCommitDetails(prev => ({
+                                    ...prev,
+                                    [commit.id]: result.commit,
+                                  }));
+                                }
+                              }
+                            }
+                          }}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                )}
+                                <h3 className="font-semibold truncate max-w-2xl" title={commit.message}>
+                                  {commit.message && commit.message.length > 80 
+                                    ? `${commit.message.substring(0, 80)}...` 
+                                    : commit.message}
+                                </h3>
+                              </div>
+                              <p className="text-sm text-muted-foreground ml-6">
+                                {commit.authorName} • {commit.date ? new Date(commit.date).toLocaleDateString() : ''}
+                              </p>
+                            </div>
+                            <span className="text-xs font-mono text-muted-foreground">
+                              {commit.sha.substring(0, 7)}
+                            </span>
+                          </div>
+                          {commit.filesChanged && Array.isArray(commit.filesChanged) && (
+                            <div className="ml-6 mt-2 text-sm text-muted-foreground">
+                              {commit.filesChanged.length} file(s) changed
+                            </div>
+                          )}
+                        </div>
+
+                        {isExpanded && details && (
+                          <div className="mt-4 pt-4 border-t border-border space-y-4">
+                            {/* Diffs */}
+                            {details.filesChanged && Array.isArray(details.filesChanged) && details.filesChanged.length > 0 && (
+                              <div>
+                                <h4 className="font-semibold mb-2 text-sm">Files Changed:</h4>
+                                <div className="space-y-2">
+                                  {details.filesChanged.map((file, idx) => (
+                                    <div key={idx} className="bg-card border border-border rounded p-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm font-mono">{file.filename}</span>
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <span className="text-green-600">+{file.additions}</span>
+                                          <span className="text-red-600">-{file.deletions}</span>
+                                        </div>
+                                      </div>
+                                      {file.patch && (
+                                        <details className="mt-2">
+                                          <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                                            Show diff
+                                          </summary>
+                                          <div className="mt-2 text-xs bg-muted p-3 rounded overflow-x-auto max-h-64 overflow-y-auto font-mono leading-relaxed">
+                                            {file.patch.split('\n').map((line, lineIdx) => {
+                                              // Convert tabs to spaces for consistent indentation (4 spaces per tab)
+                                              const normalizedLine = line.replace(/\t/g, '    ');
+                                              
+                                              if (normalizedLine.startsWith('+') && !normalizedLine.startsWith('+++')) {
+                                                return (
+                                                  <div 
+                                                    key={lineIdx} 
+                                                    className="text-green-600 bg-green-500/10 whitespace-pre font-mono block"
+                                                  >
+                                                    {normalizedLine}
+                                                  </div>
+                                                );
+                                              } else if (normalizedLine.startsWith('-') && !normalizedLine.startsWith('---')) {
+                                                return (
+                                                  <div 
+                                                    key={lineIdx} 
+                                                    className="text-red-600 bg-red-500/10 whitespace-pre font-mono block"
+                                                  >
+                                                    {normalizedLine}
+                                                  </div>
+                                                );
+                                              } else if (normalizedLine.startsWith('@@')) {
+                                                return (
+                                                  <div key={lineIdx} className="text-blue-400 bg-blue-500/20 font-semibold whitespace-pre font-mono block">
+                                                    {normalizedLine}
+                                                  </div>
+                                                );
+                                              } else {
+                                                return (
+                                                  <div 
+                                                    key={lineIdx} 
+                                                    className="text-muted-foreground whitespace-pre font-mono block"
+                                                  >
+                                                    {normalizedLine}
+                                                  </div>
+                                                );
+                                              }
+                                            })}
+                                          </div>
+                                        </details>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* PRs */}
+                            {details.prs && details.prs.length > 0 && (
+                              <div>
+                                <h4 className="font-semibold mb-2 text-sm flex items-center gap-2">
+                                  <GitPullRequest className="h-4 w-4" />
+                                  Pull Requests:
+                                </h4>
+                                <div className="space-y-2">
+                                  {details.prs.map((pr) => (
+                                    <div key={pr.id} className="bg-card border border-border rounded p-3">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-sm font-semibold">PR #{pr.number}</span>
+                                        <span className={`text-xs px-2 py-0.5 rounded ${
+                                          pr.state === 'open' ? 'bg-green-500/20 text-green-600' :
+                                          pr.state === 'closed' ? 'bg-red-500/20 text-red-600' :
+                                          'bg-blue-500/20 text-blue-600'
+                                        }`}>
+                                          {pr.state}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm mb-1">{pr.title}</p>
+                                      {pr.body && (
+                                        <p className="text-xs text-muted-foreground line-clamp-2">{pr.body}</p>
+                                      )}
+
+                                      {/* Issues linked to this PR */}
+                                      {pr.issues && pr.issues.length > 0 && (
+                                        <div className="mt-2 pt-2 border-t border-border">
+                                          <p className="text-xs font-semibold mb-1 flex items-center gap-1">
+                                            <Bug className="h-3 w-3" />
+                                            Linked Issues:
+                                          </p>
+                                          <div className="space-y-1">
+                                            {pr.issues.map((issue) => (
+                                              <div key={issue.id} className="text-xs text-muted-foreground">
+                                                Issue #{issue.number}: {issue.title}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right Panel - AI Copilot */}
