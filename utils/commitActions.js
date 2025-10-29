@@ -2,7 +2,7 @@
 
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/config/db';
-import { commits, pullRequests, issues, commitToPR, commitToBranch, prToIssue } from '@/config/schema';
+import { commits, pullRequests, issues, commitToPR, commitToBranch, prToIssue, repos } from '@/config/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 
 export async function fetchCommitsForFile(owner, repoName, filePath, branchName) {
@@ -213,13 +213,14 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
 
         const commitData = commitDetailsResult.commit;
 
-        // Extract filesChanged data
+        // Extract filesChanged data - store metadata only (no patches to save DB space)
+        // Patches will be fetched on-demand when user expands a commit
         const filesChanged = commitData.files?.map(file => ({
           filename: file.filename,
           additions: file.additions,
           deletions: file.deletions,
           changes: file.changes,
-          patch: file.patch,
+          // patch: file.patch, // Don't store patch - fetch on-demand when user expands
         })) || [];
 
         // Store commit in DB
@@ -441,6 +442,43 @@ export async function getCommitDetailsWithRelations(commitId) {
       return { error: 'Commit not found' };
     }
 
+    // Check if we need to fetch patches (if filesChanged exists but has no patches)
+    let filesChangedWithPatches = commit.filesChanged;
+    const needsPatches = commit.filesChanged && Array.isArray(commit.filesChanged) && 
+      commit.filesChanged.length > 0 && 
+      commit.filesChanged.some(file => !file.patch);
+
+    if (needsPatches) {
+      // Fetch commit details from GitHub to get patches
+      const repo = await db.select()
+        .from(repos)
+        .where(eq(repos.id, commit.repoId))
+        .limit(1);
+
+      if (repo.length > 0) {
+        const repoData = repo[0];
+        const commitDetailsResult = await fetchCommitDetails(repoData.owner, repoData.name, commit.sha);
+        
+        if (!commitDetailsResult.error && commitDetailsResult.commit) {
+          // Merge patches into existing filesChanged data
+          const patchMap = new Map();
+          commitDetailsResult.commit.files?.forEach(file => {
+            patchMap.set(file.filename, file.patch);
+          });
+
+          filesChangedWithPatches = commit.filesChanged.map(file => ({
+            ...file,
+            patch: patchMap.get(file.filename) || file.patch || null, // Add patch if available
+          }));
+
+          // Update DB with patches (cache for future use)
+          await db.update(commits)
+            .set({ filesChanged: filesChangedWithPatches })
+            .where(eq(commits.id, commitId));
+        }
+      }
+    }
+
     // Get PRs linked to this commit
     const commitPRs = await db.select({
       prId: commitToPR.prId,
@@ -483,6 +521,7 @@ export async function getCommitDetailsWithRelations(commitId) {
     return {
       commit: {
         ...commit,
+        filesChanged: filesChangedWithPatches, // Use patches if fetched
         prs,
       },
     };
