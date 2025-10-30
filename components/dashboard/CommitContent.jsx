@@ -50,14 +50,7 @@ export function CommitContent({
         <div className="mb-4 flex items-center gap-3">
           <h2 className="text-2xl font-bold truncate">Commit History: {selectedFile}</h2>
           {!loadingCommits && commits.length > 0 && (
-            <div className="ml-auto flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  onChange={(e) => onSelectAllCommitsForFile(e.target.checked)}
-                />
-                All commits
-              </label>
+            <div className="ml-auto">
               <Button
                 onClick={onSubmitSelection}
                 className="h-9 px-4"
