@@ -191,17 +191,6 @@ export function CommitContent({
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1 min-w-0">
-                          <input
-                            type="checkbox"
-                            className="mr-1"
-                            checked={!!commitChecked}
-                            disabled={wouldExceedFiles}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              onToggleCommitSelect(commit.id);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
                           {isExpanded ? (
                             <ChevronDown className="h-4 w-4 text-muted-foreground" />
                           ) : (
