@@ -77,7 +77,24 @@ export default function DashboardDetail() {
 
   const [selectedCommitIds, setSelectedCommitIds] = useState(new Set());
   const [selectedCommitFiles, setSelectedCommitFiles] = useState(new Map());
-  const MAX_COMMITS = 10;
+  const MAX_COMMITS = 5; // per request limit
+  const MAX_FILES_PER_REQUEST = 10; // total files per request limit
+
+  const getCommitFileCount = (commitId) => {
+    const details = commitDetails[commitId];
+    return Array.isArray(details?.filesChanged) ? details.filesChanged.length : 0;
+  };
+
+  const getTotalSelectedFileCount = () => {
+    let total = 0;
+    selectedCommitIds.forEach((cid) => {
+      total += getCommitFileCount(cid);
+    });
+    selectedCommitFiles.forEach((filesSet, cid) => {
+      if (!selectedCommitIds.has(cid)) total += filesSet.size;
+    });
+    return total;
+  };
 
   useEffect(() => {
     async function loadRepo() {
@@ -308,6 +325,12 @@ export default function DashboardDetail() {
         console.warn(`You can select up to ${MAX_COMMITS} commits at once.`);
         return prev;
       }
+      const potential = getTotalSelectedFileCount() + getCommitFileCount(commitId);
+      if (potential > MAX_FILES_PER_REQUEST) {
+        // eslint-disable-next-line no-console
+        console.warn(`Selecting this commit exceeds the ${MAX_FILES_PER_REQUEST} files-per-request limit.`);
+        return prev;
+      }
       next.add(commitId);
       return next;
     });
@@ -317,7 +340,17 @@ export default function DashboardDetail() {
     setSelectedCommitFiles(prev => {
       const next = new Map(prev);
       const setForCommit = new Set(next.get(commitId) || []);
-      if (setForCommit.has(filename)) setForCommit.delete(filename); else setForCommit.add(filename);
+      if (setForCommit.has(filename)) {
+        setForCommit.delete(filename);
+      } else {
+        const current = getTotalSelectedFileCount();
+        if (current >= MAX_FILES_PER_REQUEST) {
+          // eslint-disable-next-line no-console
+          console.warn(`You can select up to ${MAX_FILES_PER_REQUEST} files per request.`);
+          return prev;
+        }
+        setForCommit.add(filename);
+      }
       next.set(commitId, setForCommit);
       return next;
     });
@@ -328,11 +361,17 @@ export default function DashboardDetail() {
     setSelectedCommitIds(prev => {
       if (!checked) return new Set();
       const next = new Set();
-      const toTake = Math.min(filteredCommits.length, MAX_COMMITS);
-      for (let i = 0; i < toTake; i++) next.add(filteredCommits[i].id);
-      if (filteredCommits.length > MAX_COMMITS) {
+      let filesSoFar = 0;
+      for (const c of filteredCommits) {
+        if (next.size >= MAX_COMMITS) break;
+        const fc = getCommitFileCount(c.id);
+        if (filesSoFar + fc > MAX_FILES_PER_REQUEST) break;
+        next.add(c.id);
+        filesSoFar += fc;
+      }
+      if (next.size < Math.min(filteredCommits.length, MAX_COMMITS)) {
         // eslint-disable-next-line no-console
-        console.warn(`Limited to ${MAX_COMMITS} commits. Some commits were not selected.`);
+        console.warn(`Selection limited by ${MAX_COMMITS} commits and ${MAX_FILES_PER_REQUEST} files per request.`);
       }
       return next;
     });
@@ -384,7 +423,7 @@ export default function DashboardDetail() {
       const prs = Array.isArray(details?.prs) ? details.prs : [];
       const issues = Array.isArray(details?.issues) ? details.issues : [];
 
-      const files = (isWholeCommitSelected
+      let files = (isWholeCommitSelected
         ? filesChanged
         : filesChanged.filter(f => selectedFilesForCommit?.has(f.filename))
       ).map(f => ({
@@ -393,6 +432,13 @@ export default function DashboardDetail() {
         deletions: f.deletions,
         patch: f.patch || null,
       }));
+
+
+      if (files.length > MAX_FILES_PER_REQUEST) {
+        // eslint-disable-next-line no-console
+        console.warn(`Capping files for commit ${c.sha.substring(0, 7)} to ${MAX_FILES_PER_REQUEST}.`);
+        files = files.slice(0, MAX_FILES_PER_REQUEST);
+      }
 
       if (files.length === 0) continue;
 
@@ -509,6 +555,8 @@ export default function DashboardDetail() {
             onToggleFileSelect={handleToggleFileSelect}
             onSelectAllCommitsForFile={handleSelectAllCommitsForCurrentFile}
             onSubmitSelection={handleSubmitSelection}
+            maxFilesPerRequest={MAX_FILES_PER_REQUEST}
+            currentSelectedFileCount={getTotalSelectedFileCount()}
           />
         </div>
 

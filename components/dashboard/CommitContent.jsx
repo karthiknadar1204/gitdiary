@@ -32,6 +32,8 @@ export function CommitContent({
   onToggleFileSelect,
   onSelectAllCommitsForFile,
   onSubmitSelection,
+  maxFilesPerRequest,
+  currentSelectedFileCount,
 }) {
   if (!selectedFile) {
     return (
@@ -59,6 +61,7 @@ export function CommitContent({
               <Button
                 onClick={onSubmitSelection}
                 className="h-9 px-4"
+                disabled={currentSelectedFileCount === 0}
               >
                 Submit
               </Button>
@@ -175,6 +178,10 @@ export function CommitContent({
               const details = commitDetails[commit.id];
 
               const commitChecked = selectedCommitIds?.has(commit.id);
+              const commitFileCount = Array.isArray(commitDetails?.[commit.id]?.filesChanged)
+                ? commitDetails[commit.id].filesChanged.length
+                : 0;
+              const wouldExceedFiles = !commitChecked && (currentSelectedFileCount + commitFileCount) > (maxFilesPerRequest || 10);
               return (
                 <div key={commit.id} className="border border-border rounded-lg p-4">
                   <div
@@ -188,6 +195,7 @@ export function CommitContent({
                             type="checkbox"
                             className="mr-1"
                             checked={!!commitChecked}
+                            disabled={wouldExceedFiles}
                             onChange={(e) => {
                               e.stopPropagation();
                               onToggleCommitSelect(commit.id);
@@ -233,6 +241,7 @@ export function CommitContent({
                                     <input
                                       type="checkbox"
                                       checked={commitChecked || !!selectedCommitFiles?.get(commit.id)?.has(file.filename)}
+                                      disabled={commitChecked || (!selectedCommitFiles?.get(commit.id)?.has(file.filename) && currentSelectedFileCount >= (maxFilesPerRequest || 10))}
                                       onChange={(e) => {
                                         e.stopPropagation();
                                         onToggleFileSelect(commit.id, file.filename);
