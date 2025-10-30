@@ -10,6 +10,7 @@ import RepoHeader from '@/components/dashboard/RepoHeader';
 import FilesSidebar from '@/components/dashboard/FilesSidebar';
 import CommitContent from '@/components/dashboard/CommitContent';
 import AICopilotPanel from '@/components/dashboard/AICopilotPanel';
+import { buildLlmBatches } from '@/utils/llmPrep';
 
 export default function DashboardDetail() {
   const params = useParams();
@@ -76,6 +77,7 @@ export default function DashboardDetail() {
 
   const [selectedCommitIds, setSelectedCommitIds] = useState(new Set());
   const [selectedCommitFiles, setSelectedCommitFiles] = useState(new Map());
+  const MAX_COMMITS = 10;
 
   useEffect(() => {
     async function loadRepo() {
@@ -297,7 +299,16 @@ export default function DashboardDetail() {
   const handleToggleCommitSelect = (commitId) => {
     setSelectedCommitIds(prev => {
       const next = new Set(prev);
-      if (next.has(commitId)) next.delete(commitId); else next.add(commitId);
+      if (next.has(commitId)) {
+        next.delete(commitId);
+        return next;
+      }
+      if (next.size >= MAX_COMMITS) {
+        // eslint-disable-next-line no-console
+        console.warn(`You can select up to ${MAX_COMMITS} commits at once.`);
+        return prev;
+      }
+      next.add(commitId);
       return next;
     });
   };
@@ -316,8 +327,13 @@ export default function DashboardDetail() {
     if (!selectedFile) return;
     setSelectedCommitIds(prev => {
       if (!checked) return new Set();
-      const next = new Set(prev);
-      filteredCommits.forEach(c => next.add(c.id));
+      const next = new Set();
+      const toTake = Math.min(filteredCommits.length, MAX_COMMITS);
+      for (let i = 0; i < toTake; i++) next.add(filteredCommits[i].id);
+      if (filteredCommits.length > MAX_COMMITS) {
+        // eslint-disable-next-line no-console
+        console.warn(`Limited to ${MAX_COMMITS} commits. Some commits were not selected.`);
+      }
       return next;
     });
     if (checked) {
@@ -365,6 +381,8 @@ export default function DashboardDetail() {
 
       const details = commitDetails[c.id];
       const filesChanged = Array.isArray(details?.filesChanged) ? details.filesChanged : [];
+      const prs = Array.isArray(details?.prs) ? details.prs : [];
+      const issues = Array.isArray(details?.issues) ? details.issues : [];
 
       const files = (isWholeCommitSelected
         ? filesChanged
@@ -385,11 +403,14 @@ export default function DashboardDetail() {
         authorName: c.authorName,
         date: c.date,
         files,
+        prs,
+        issues,
       });
     }
 
+    const batches = await buildLlmBatches({ commitsDetailed: detailed });
     // eslint-disable-next-line no-console
-    console.log('Selection (detailed):', detailed);
+    console.log('LLM batches:', batches);
   };
 
   if (loading) {
