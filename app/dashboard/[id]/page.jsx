@@ -74,6 +74,9 @@ export default function DashboardDetail() {
   const [hashFrom, setHashFrom] = useState('');
   const [hashTo, setHashTo] = useState('');
 
+  const [selectedCommitIds, setSelectedCommitIds] = useState(new Set());
+  const [selectedCommitFiles, setSelectedCommitFiles] = useState(new Map());
+
   useEffect(() => {
     async function loadRepo() {
       const result = await getRepoById(repoId);
@@ -279,6 +282,89 @@ export default function DashboardDetail() {
     return tree;
   }, [files]);
 
+  const toggleFolder = (folderPath) => {
+    setExpandedFolders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(folderPath)) {
+        newSet.delete(folderPath);
+      } else {
+        newSet.add(folderPath);
+      }
+      return newSet;
+    });
+  };
+
+  const handleToggleCommitSelect = (commitId) => {
+    setSelectedCommitIds(prev => {
+      const next = new Set(prev);
+      if (next.has(commitId)) next.delete(commitId); else next.add(commitId);
+      return next;
+    });
+  };
+
+  const handleToggleFileSelect = (commitId, filename) => {
+    setSelectedCommitFiles(prev => {
+      const next = new Map(prev);
+      const setForCommit = new Set(next.get(commitId) || []);
+      if (setForCommit.has(filename)) setForCommit.delete(filename); else setForCommit.add(filename);
+      next.set(commitId, setForCommit);
+      return next;
+    });
+  };
+
+  const handleSelectAllCommitsForCurrentFile = (checked) => {
+    if (!selectedFile) return;
+    setSelectedCommitIds(prev => {
+      if (!checked) return new Set();
+      const next = new Set(prev);
+      filteredCommits.forEach(c => next.add(c.id));
+      return next;
+    });
+  };
+
+  const handleSubmitSelection = () => {
+    const detailed = [];
+
+    const commitIdSet = new Set(selectedCommitIds);
+    const filesMap = selectedCommitFiles;
+
+    const inScopeCommits = filteredCommits && Array.isArray(filteredCommits) ? filteredCommits : commits;
+
+    for (const c of inScopeCommits) {
+      const isWholeCommitSelected = commitIdSet.has(c.id);
+      const selectedFilesForCommit = filesMap.get(c.id);
+
+      if (!isWholeCommitSelected && (!selectedFilesForCommit || selectedFilesForCommit.size === 0)) continue;
+
+      const details = commitDetails[c.id];
+      const filesChanged = Array.isArray(details?.filesChanged) ? details.filesChanged : [];
+
+      const files = (isWholeCommitSelected
+        ? filesChanged
+        : filesChanged.filter(f => selectedFilesForCommit?.has(f.filename))
+      ).map(f => ({
+        filename: f.filename,
+        additions: f.additions,
+        deletions: f.deletions,
+        patch: f.patch || null,
+      }));
+
+      if (files.length === 0) continue;
+
+      detailed.push({
+        commitId: c.id,
+        sha: c.sha,
+        message: c.message,
+        authorName: c.authorName,
+        date: c.date,
+        files,
+      });
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('Selection (detailed):', detailed);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
@@ -293,17 +379,6 @@ export default function DashboardDetail() {
     return null;
   }
 
-  const toggleFolder = (folderPath) => {
-    setExpandedFolders(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(folderPath)) {
-        newSet.delete(folderPath);
-      } else {
-        newSet.add(folderPath);
-      }
-      return newSet;
-    });
-  };
 
   const handleToggleCommit = async (commit, isExpanded, details) => {
     if (isExpanded) {
@@ -380,6 +455,12 @@ export default function DashboardDetail() {
             expandedCommits={expandedCommits}
             onToggleCommit={handleToggleCommit}
             commitDetails={commitDetails}
+            selectedCommitIds={selectedCommitIds}
+            selectedCommitFiles={selectedCommitFiles}
+            onToggleCommitSelect={handleToggleCommitSelect}
+            onToggleFileSelect={handleToggleFileSelect}
+            onSelectAllCommitsForFile={handleSelectAllCommitsForCurrentFile}
+            onSubmitSelection={handleSubmitSelection}
           />
         </div>
 

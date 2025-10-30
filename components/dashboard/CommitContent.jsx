@@ -26,6 +26,12 @@ export function CommitContent({
   expandedCommits,
   onToggleCommit,
   commitDetails,
+  selectedCommitIds,
+  selectedCommitFiles,
+  onToggleCommitSelect,
+  onToggleFileSelect,
+  onSelectAllCommitsForFile,
+  onSubmitSelection,
 }) {
   if (!selectedFile) {
     return (
@@ -39,7 +45,26 @@ export function CommitContent({
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-8">
-        <h2 className="text-2xl font-bold mb-4">Commit History: {selectedFile}</h2>
+        <div className="mb-4 flex items-center gap-3">
+          <h2 className="text-2xl font-bold truncate">Commit History: {selectedFile}</h2>
+          {!loadingCommits && commits.length > 0 && (
+            <div className="ml-auto flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  onChange={(e) => onSelectAllCommitsForFile(e.target.checked)}
+                />
+                All commits
+              </label>
+              <Button
+                onClick={onSubmitSelection}
+                className="h-9 px-4"
+              >
+                Submit
+              </Button>
+            </div>
+          )}
+        </div>
 
         {!loadingCommits && commits.length > 0 && (
           <div className="mb-6 p-4 border border-border rounded-lg bg-card">
@@ -149,6 +174,7 @@ export function CommitContent({
               const isExpanded = expandedCommits.has(commit.id);
               const details = commitDetails[commit.id];
 
+              const commitChecked = selectedCommitIds?.has(commit.id);
               return (
                 <div key={commit.id} className="border border-border rounded-lg p-4">
                   <div
@@ -156,14 +182,24 @@ export function CommitContent({
                     onClick={() => onToggleCommit(commit, isExpanded, details)}
                   >
                     <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 min-w-0">
+                          <input
+                            type="checkbox"
+                            className="mr-1"
+                            checked={!!commitChecked}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              onToggleCommitSelect(commit.id);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                           {isExpanded ? (
                             <ChevronDown className="h-4 w-4 text-muted-foreground" />
                           ) : (
                             <ChevronRight className="h-4 w-4 text-muted-foreground" />
                           )}
-                          <h3 className="font-semibold truncate max-w-2xl" title={commit.message}>
+                          <h3 className="font-semibold truncate max-w-full" title={commit.message}>
                             {commit.message && commit.message.length > 80 
                               ? `${commit.message.substring(0, 80)}...` 
                               : commit.message}
@@ -173,7 +209,7 @@ export function CommitContent({
                           {commit.authorName} • {commit.date ? new Date(commit.date).toLocaleDateString() : ''}
                         </p>
                       </div>
-                      <span className="text-xs font-mono text-muted-foreground">
+                      <span className="text-xs font-mono text-muted-foreground flex-none shrink-0 whitespace-nowrap ml-2">
                         {commit.sha.substring(0, 7)}
                       </span>
                     </div>
@@ -193,7 +229,18 @@ export function CommitContent({
                             {details.filesChanged.map((file, idx) => (
                               <div key={idx} className="bg-card border border-border rounded p-3">
                                 <div className="flex items-center justify-between mb-2">
-                                  <span className="text-sm font-mono">{file.filename}</span>
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={commitChecked || !!selectedCommitFiles?.get(commit.id)?.has(file.filename)}
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        onToggleFileSelect(commit.id, file.filename);
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <span className="text-sm font-mono">{file.filename}</span>
+                                  </div>
                                   <div className="flex items-center gap-2 text-xs">
                                     <span className="text-green-600">+{file.additions}</span>
                                     <span className="text-red-600">-{file.deletions}</span>
