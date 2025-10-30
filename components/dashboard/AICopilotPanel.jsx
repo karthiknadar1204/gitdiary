@@ -3,16 +3,26 @@
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import ReactMarkdown from 'react-markdown';
+import { X } from 'lucide-react';
 
-export function AICopilotPanel({ batches = null, width, onSubmitPrompt, conversations = [], loadingAi = false }) {
+export function AICopilotPanel({ batches = null, width, onSubmitPrompt, conversations = [], loadingAi = false, onClearSelections }) {
   const [prompt, setPrompt] = useState("");
   return (
     <div className="max-w-[40%] min-w-60 border-l border-border bg-card" style={{ width }}>
       <div className="h-full flex flex-col">
-        <div className="p-4 border-b border-border">
+        <div className="p-4 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-semibold flex items-center gap-2">
             ✨ AI Copilot
           </h2>
+          {batches && batches.length > 0 && conversations.length === 0 && onClearSelections && (
+            <button
+              onClick={onClearSelections}
+              className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent transition-colors"
+              aria-label="Clear selections"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
         {!batches || batches.length === 0 ? (
           <div className="p-8 flex flex-col items-center justify-center flex-1 overflow-y-auto">

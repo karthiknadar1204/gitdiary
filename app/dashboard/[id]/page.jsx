@@ -28,6 +28,7 @@ export default function DashboardDetail() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [commits, setCommits] = useState([]);
   const [loadingCommits, setLoadingCommits] = useState(false);
+  const [allCommitsMap, setAllCommitsMap] = useState(new Map());
   const [expandedCommits, setExpandedCommits] = useState(new Set());
   const [commitDetails, setCommitDetails] = useState({});
   const [branchOpen, setBranchOpen] = useState(false);
@@ -214,12 +215,7 @@ export default function DashboardDetail() {
     setLoadingCommits(true);
     setCommits([]);
 
-    setFilterType('all');
-    setLastNValue(50);
-    setDateFrom('');
-    setDateTo('');
-    setHashFrom('');
-    setHashTo('');
+    // Don't clear selections when switching files - preserve user choices
 
     try {
       const result = await syncFileCommits(
@@ -241,7 +237,14 @@ export default function DashboardDetail() {
       if (commitsResult.error) {
         console.error(commitsResult.error);
       } else {
-        setCommits(commitsResult.commits || []);
+        const loadedCommits = commitsResult.commits || [];
+        setCommits(loadedCommits);
+        // Store in global map to preserve across file switches
+        setAllCommitsMap(prev => {
+          const next = new Map(prev);
+          loadedCommits.forEach(c => next.set(c.id, c));
+          return next;
+        });
       }
     } catch (error) {
       console.error('Error loading commits:', error);
@@ -426,7 +429,10 @@ export default function DashboardDetail() {
     const detailed = [];
     const filesMap = selectedCommitFiles;
 
-    const inScopeCommits = filteredCommits && Array.isArray(filteredCommits) ? filteredCommits : commits;
+    // Get all selected commits from the global map, not just current file
+    const inScopeCommits = Array.from(allCommitsMap.values()).filter(c =>
+      commitIdSet.has(c.id) || filesMap.has(c.id)
+    );
 
     for (const c of inScopeCommits) {
       const isWholeCommitSelected = commitIdSet.has(c.id);
@@ -501,6 +507,13 @@ export default function DashboardDetail() {
     } finally {
       setLoadingAi(false);
     }
+  };
+
+  const handleClearSelections = () => {
+    setRightBatches(null);
+    setConversations([]);
+    setSelectedCommitIds(new Set());
+    setSelectedCommitFiles(new Map());
   };
 
   if (loading) {
@@ -613,7 +626,7 @@ export default function DashboardDetail() {
           <div className="absolute inset-y-0 left-0 right-0 bg-border/0 group-hover:bg-border/60 transition-colors" />
         </div>
 
-        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} onSubmitPrompt={handlePromptSubmit} conversations={conversations} loadingAi={loadingAi} />
+        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} onSubmitPrompt={handlePromptSubmit} conversations={conversations} loadingAi={loadingAi} onClearSelections={handleClearSelections} />
       </div>
     </div>
   );
