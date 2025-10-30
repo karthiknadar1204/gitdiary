@@ -45,8 +45,8 @@ export function CommitContent({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="p-8">
+    <div className="h-full overflow-y-auto w-full min-w-0">
+      <div className="p-8 max-w-full w-full min-w-0">
         <div className="mb-4 flex items-center gap-3">
           <h2 className="text-2xl font-bold truncate">Commit History: {selectedFile}</h2>
           {!loadingCommits && commits.length > 0 && (
@@ -172,7 +172,7 @@ export function CommitContent({
         ) : filteredCommits.length === 0 ? (
           <div className="text-muted-foreground">No commits match the selected filter.</div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 max-w-full w-full min-w-0">
             {filteredCommits.map((commit) => {
               const isExpanded = expandedCommits.has(commit.id);
               const details = commitDetails[commit.id];
@@ -183,7 +183,7 @@ export function CommitContent({
                 : 0;
               const wouldExceedFiles = !commitChecked && (currentSelectedFileCount + commitFileCount) > (maxFilesPerRequest || 10);
               return (
-                <div key={commit.id} className="border border-border rounded-lg p-4">
+                <div key={commit.id} className="border border-border rounded-lg p-4 max-w-full w-full min-w-0 overflow-x-auto">
                   <div
                     className="cursor-pointer"
                     onClick={() => onToggleCommit(commit, isExpanded, details)}
@@ -235,11 +235,12 @@ export function CommitContent({
                           <h4 className="font-semibold mb-2 text-sm">Files Changed:</h4>
                           <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
                             {details.filesChanged.map((file, idx) => (
-                              <div key={idx} className="bg-card border border-border rounded p-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="flex items-center gap-2">
+                              <div key={idx} className="bg-card border border-border rounded p-3 w-full min-w-0">
+                                <div className="flex items-center justify-between mb-2 gap-2 min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
                                     <input
                                       type="checkbox"
+                                      className="flex-none"
                                       checked={commitChecked || !!selectedCommitFiles?.get(commit.id)?.has(file.filename)}
                                       disabled={commitChecked || (!selectedCommitFiles?.get(commit.id)?.has(file.filename) && currentSelectedFileCount >= (maxFilesPerRequest || 10))}
                                       onChange={(e) => {
@@ -248,9 +249,9 @@ export function CommitContent({
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     />
-                                    <span className="text-sm font-mono">{file.filename}</span>
+                                    <span className="text-sm font-mono truncate">{file.filename}</span>
                                   </div>
-                                  <div className="flex items-center gap-2 text-xs">
+                                  <div className="flex items-center gap-2 text-xs flex-none">
                                     <span className="text-green-600">+{file.additions}</span>
                                     <span className="text-red-600">-{file.deletions}</span>
                                   </div>
