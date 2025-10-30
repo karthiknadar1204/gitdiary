@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 export function FilesSidebar({
   width,
   syncing,
+  loadingFiles,
   branches,
   selectedBranch,
   branchOpen,
@@ -179,7 +180,7 @@ export function FilesSidebar({
       </div>
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="p-4">
-          {syncing ? (
+          {syncing || loadingFiles ? (
             <div className="text-sm text-muted-foreground">Loading files...</div>
           ) : Object.keys(fileTree || {}).length === 0 ? (
             <div className="text-sm text-muted-foreground">No files found</div>

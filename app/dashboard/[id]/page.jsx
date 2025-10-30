@@ -24,6 +24,7 @@ export default function DashboardDetail() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const loadingFilesRef = useRef(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [selectedFile, setSelectedFile] = useState(null);
   const [commits, setCommits] = useState([]);
@@ -171,6 +172,7 @@ export default function DashboardDetail() {
       if (!selectedBranch || !repo || loadingFilesRef.current) return;
 
       loadingFilesRef.current = true;
+      setLoadingFiles(true);
 
       try {
         const dbFilesResult = await getFilesForBranch(selectedBranch.id);
@@ -190,6 +192,7 @@ export default function DashboardDetail() {
         }
       } finally {
         loadingFilesRef.current = false;
+        setLoadingFiles(false);
       }
     }
 
@@ -484,7 +487,8 @@ export default function DashboardDetail() {
 
   const handlePromptSubmit = async (userPrompt) => {
     if (!rightBatches) return;
-    setConversations(prev => [...prev, { type: 'user', content: userPrompt }]);
+    // Keep the user's prompt visible and create an AI placeholder to stream into
+    setConversations(prev => [...prev, { type: 'user', content: userPrompt }, { type: 'ai', content: '' }]);
     setLoadingAi(true);
     let streamedText = '';
     try {
@@ -500,10 +504,30 @@ export default function DashboardDetail() {
         const { done, value } = await reader.read();
         if (done) break;
         streamedText += decoder.decode(value, { stream: true });
-        setConversations(prev => [...prev.slice(0, -1), { type: 'ai', content: streamedText }]);
+        // Update the last AI message in place as the stream arrives
+        setConversations(prev => {
+          const next = [...prev];
+          const lastIndex = next.length - 1;
+          if (lastIndex >= 0 && next[lastIndex].type === 'ai') {
+            next[lastIndex] = { ...next[lastIndex], content: streamedText };
+          } else {
+            next.push({ type: 'ai', content: streamedText });
+          }
+          return next;
+        });
       }
     } catch (err) {
-      setConversations(prev => [...prev, { type: 'ai', content: 'Error calling AI API' }]);
+      // Replace the last AI placeholder with an error message
+      setConversations(prev => {
+        const next = [...prev];
+        const lastIndex = next.length - 1;
+        if (lastIndex >= 0 && next[lastIndex].type === 'ai') {
+          next[lastIndex] = { ...next[lastIndex], content: 'Error calling AI API' };
+        } else {
+          next.push({ type: 'ai', content: 'Error calling AI API' });
+        }
+        return next;
+      });
     } finally {
       setLoadingAi(false);
     }
@@ -562,6 +586,7 @@ export default function DashboardDetail() {
         <FilesSidebar
           width={leftSidebarWidth}
           syncing={syncing}
+          loadingFiles={loadingFiles}
           branches={branches}
           selectedBranch={selectedBranch}
           branchOpen={branchOpen}
