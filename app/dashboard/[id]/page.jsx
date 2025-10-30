@@ -312,7 +312,7 @@ export default function DashboardDetail() {
     });
   };
 
-  const handleSelectAllCommitsForCurrentFile = (checked) => {
+  const handleSelectAllCommitsForCurrentFile = async (checked) => {
     if (!selectedFile) return;
     setSelectedCommitIds(prev => {
       if (!checked) return new Set();
@@ -320,12 +320,39 @@ export default function DashboardDetail() {
       filteredCommits.forEach(c => next.add(c.id));
       return next;
     });
+    if (checked) {
+      const missing = filteredCommits.filter(c => !commitDetails[c.id]);
+      if (missing.length > 0) {
+        const results = await Promise.allSettled(missing.map(c => getCommitDetailsWithRelations(c.id)));
+        const updates = {};
+        results.forEach((res, idx) => {
+          if (res.status === 'fulfilled' && !res.value?.error && res.value?.commit) {
+            updates[missing[idx].id] = res.value.commit;
+          }
+        });
+        if (Object.keys(updates).length > 0) {
+          setCommitDetails(prev => ({ ...prev, ...updates }));
+        }
+      }
+    }
   };
 
-  const handleSubmitSelection = () => {
-    const detailed = [];
-
+  const handleSubmitSelection = async () => {
     const commitIdSet = new Set(selectedCommitIds);
+    const needDetails = Array.from(commitIdSet).filter(id => !commitDetails[id]);
+    if (needDetails.length > 0) {
+      const results = await Promise.allSettled(needDetails.map(id => getCommitDetailsWithRelations(id)));
+      const toMerge = {};
+      results.forEach((res, idx) => {
+        if (res.status === 'fulfilled' && !res.value?.error && res.value?.commit) {
+          toMerge[needDetails[idx]] = res.value.commit;
+        }
+      });
+      if (Object.keys(toMerge).length > 0) {
+        setCommitDetails(prev => ({ ...prev, ...toMerge }));
+      }
+    }
+    const detailed = [];
     const filesMap = selectedCommitFiles;
 
     const inScopeCommits = filteredCommits && Array.isArray(filteredCommits) ? filteredCommits : commits;
