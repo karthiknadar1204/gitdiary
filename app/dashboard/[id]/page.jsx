@@ -38,21 +38,34 @@ export default function DashboardDetail() {
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(256);
   const minLeftWidth = 200;
   const maxLeftWidth = 480;
+  const [rightBatches, setRightBatches] = useState(null);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(320);
+  const minRightWidth = 240;
+  const maxRightWidth = 560;
+  const [isResizingRight, setIsResizingRight] = useState(false);
 
   useEffect(() => {
     function onMouseMove(e) {
-      if (!isResizing || !containerRef.current) return;
-      const containerLeft = containerRef.current.getBoundingClientRect().left;
-      const nextWidth = e.clientX - containerLeft;
-      const clamped = Math.max(minLeftWidth, Math.min(maxLeftWidth, nextWidth));
-      setLeftSidebarWidth(clamped);
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      if (isResizing) {
+        const nextWidth = e.clientX - rect.left;
+        const clamped = Math.max(minLeftWidth, Math.min(maxLeftWidth, nextWidth));
+        setLeftSidebarWidth(clamped);
+      }
+      if (isResizingRight) {
+        const nextWidthRight = rect.right - e.clientX;
+        const clampedRight = Math.max(minRightWidth, Math.min(maxRightWidth, nextWidthRight));
+        setRightSidebarWidth(clampedRight);
+      }
     }
 
     function onMouseUp() {
       if (isResizing) setIsResizing(false);
+      if (isResizingRight) setIsResizingRight(false);
     }
 
-    if (isResizing) {
+    if (isResizing || isResizingRight) {
       document.addEventListener('mousemove', onMouseMove);
       document.addEventListener('mouseup', onMouseUp);
       document.body.style.userSelect = 'none';
@@ -65,7 +78,7 @@ export default function DashboardDetail() {
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
     };
-  }, [isResizing]);
+  }, [isResizing, isResizingRight]);
 
 
   const [filterType, setFilterType] = useState('all');
@@ -457,6 +470,7 @@ export default function DashboardDetail() {
     const batches = await buildLlmBatches({ commitsDetailed: detailed });
     // eslint-disable-next-line no-console
     console.log('LLM batches:', batches);
+    setRightBatches(batches);
   };
 
   if (loading) {
@@ -560,7 +574,16 @@ export default function DashboardDetail() {
           />
         </div>
 
-        <AICopilotPanel />
+        {/* Right resize handle (left edge of right panel) */}
+        <div
+          onMouseDown={() => setIsResizingRight(true)}
+          className="w-1 cursor-col-resize relative group"
+          aria-label="Resize right sidebar"
+        >
+          <div className="absolute inset-y-0 left-0 right-0 bg-border/0 group-hover:bg-border/60 transition-colors" />
+        </div>
+
+        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} />
       </div>
     </div>
   );
