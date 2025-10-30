@@ -45,18 +45,32 @@ Tone:
 Here are the commits:
 ${JSON.stringify(batches, null, 2)}`;
 
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userContent },
-            ],
-            temperature: 0.7,
-        });
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      temperature: 0.7,
+      stream: true,
+    });
 
-        const analysis = response.choices[0]?.message?.content || 'No response from AI';
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          const text = chunk.choices[0]?.delta?.content || '';
+          if (text) {
+            controller.enqueue(encoder.encode(text));
+          }
+        }
+        controller.close();
+      },
+    });
 
-        return NextResponse.json({ analysis });
+    return new Response(readable, {
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
     } catch (error) {
         console.error('AI API error:', error);
         return NextResponse.json({ error: 'Failed to get AI response' }, { status: 500 });

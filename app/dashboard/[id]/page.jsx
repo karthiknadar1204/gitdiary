@@ -41,6 +41,7 @@ export default function DashboardDetail() {
   const [rightBatches, setRightBatches] = useState(null);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  const [conversations, setConversations] = useState([]);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(320);
   const minRightWidth = 240;
   const maxRightWidth = 560;
@@ -477,17 +478,26 @@ export default function DashboardDetail() {
 
   const handlePromptSubmit = async (userPrompt) => {
     if (!rightBatches) return;
+    setConversations(prev => [...prev, { type: 'user', content: userPrompt }]);
     setLoadingAi(true);
+    let streamedText = '';
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ batches: rightBatches, userPrompt }),
       });
-      const data = await res.json();
-      setAiAnalysis(data.analysis || data.error || 'No response');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      streamedText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        streamedText += decoder.decode(value, { stream: true });
+        setConversations(prev => [...prev.slice(0, -1), { type: 'ai', content: streamedText }]);
+      }
     } catch (err) {
-      setAiAnalysis('Error calling AI API');
+      setConversations(prev => [...prev, { type: 'ai', content: 'Error calling AI API' }]);
     } finally {
       setLoadingAi(false);
     }
@@ -603,7 +613,7 @@ export default function DashboardDetail() {
           <div className="absolute inset-y-0 left-0 right-0 bg-border/0 group-hover:bg-border/60 transition-colors" />
         </div>
 
-        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} onSubmitPrompt={handlePromptSubmit} aiAnalysis={aiAnalysis} loadingAi={loadingAi} />
+        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} onSubmitPrompt={handlePromptSubmit} conversations={conversations} loadingAi={loadingAi} />
       </div>
     </div>
   );
