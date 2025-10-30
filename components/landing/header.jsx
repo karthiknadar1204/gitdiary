@@ -1,6 +1,7 @@
 "use client";
 
 import { GitBranch, Github } from "lucide-react";
+import Link from "next/link";
 import {
   SignInButton,
   SignUpButton,
@@ -28,14 +29,18 @@ export function Header() {
             View on GitHub
           </a>
           <SignedOut>
-            <SignInButton />
-            <SignUpButton>
+            <SignInButton mode="modal">
               <button className="bg-primary text-primary-foreground rounded-full font-medium text-sm px-4 h-9 cursor-pointer hover:bg-primary/90 transition-colors">
-                Sign Up
+                Sign In
               </button>
-            </SignUpButton>
+            </SignInButton>
           </SignedOut>
           <SignedIn>
+            <Link href="/dashboard">
+              <button className="bg-primary text-primary-foreground rounded-full font-medium text-sm px-4 h-9 cursor-pointer hover:bg-primary/90 transition-colors">
+                Dashboard
+              </button>
+            </Link>
             <UserButton />
           </SignedIn>
         </div>

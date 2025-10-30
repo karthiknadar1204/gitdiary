@@ -10,7 +10,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { Folder, File, ChevronRight, ChevronDown, GitPullRequest, Bug, Check, ChevronsUpDown, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +34,39 @@ export default function DashboardDetail() {
   const [branchOpen, setBranchOpen] = useState(false);
   const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const [visibleBranchCount, setVisibleBranchCount] = useState(50);
+  const containerRef = useRef(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(256);
+  const minLeftWidth = 200;
+  const maxLeftWidth = 480;
+
+  useEffect(() => {
+    function onMouseMove(e) {
+      if (!isResizing || !containerRef.current) return;
+      const containerLeft = containerRef.current.getBoundingClientRect().left;
+      const nextWidth = e.clientX - containerLeft;
+      const clamped = Math.max(minLeftWidth, Math.min(maxLeftWidth, nextWidth));
+      setLeftSidebarWidth(clamped);
+    }
+
+    function onMouseUp() {
+      if (isResizing) setIsResizing(false);
+    }
+
+    if (isResizing) {
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizing]);
   
   // Filter states
   const [filterType, setFilterType] = useState('all'); // 'all', 'lastN', 'dateRange', 'hashRange'
@@ -372,10 +404,10 @@ export default function DashboardDetail() {
         </div>
       </header>
 
-      {/* Three Column Layout */}
-      <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-4rem)]">
-        {/* Left Panel - Files */}
-        <ResizablePanel defaultSize={20} minSize={15} maxSize={40} className="border-r border-border bg-card flex flex-col min-h-0">
+      {/* Three Column Layout (regular fixed sidebars) */}
+      <div ref={containerRef} className="h-[calc(100vh-4rem)] flex">
+        {/* Left Sidebar - Files */}
+        <div style={{ width: leftSidebarWidth }} className="border-r border-border bg-card flex flex-col min-h-0">
           <div className="p-4 border-b border-border flex-shrink-0">
             <h2 className="text-sm font-semibold mb-3">FILES</h2>
             <Popover open={branchOpen} onOpenChange={setBranchOpen}>
@@ -481,12 +513,18 @@ export default function DashboardDetail() {
               )}
             </div>
           </div>
-        </ResizablePanel>
+        </div>
+        {/* Resize Handle */}
+        <div
+          onMouseDown={() => setIsResizing(true)}
+          className="w-1 cursor-col-resize relative group"
+          aria-label="Resize sidebar"
+        >
+          <div className="absolute inset-y-0 left-0 right-0 bg-border/0 group-hover:bg-border/60 transition-colors" />
+        </div>
 
-        <ResizableHandle withHandle />
-
-        {/* Middle Panel - Main Content */}
-        <ResizablePanel defaultSize={55} minSize={30}>
+        {/* Middle Content */}
+        <div className="flex-1 min-w-0">
           <div className="h-full overflow-y-auto">
           {!selectedFile ? (
             <div className="p-8">
@@ -670,7 +708,7 @@ export default function DashboardDetail() {
                             {details.filesChanged && Array.isArray(details.filesChanged) && details.filesChanged.length > 0 && (
                               <div>
                                 <h4 className="font-semibold mb-2 text-sm">Files Changed:</h4>
-                                <div className="space-y-2">
+                                <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
                                   {details.filesChanged.map((file, idx) => (
                                     <div key={idx} className="bg-card border border-border rounded p-3">
                                       <div className="flex items-center justify-between mb-2">
@@ -790,12 +828,10 @@ export default function DashboardDetail() {
             </div>
           )}
           </div>
-        </ResizablePanel>
+        </div>
 
-        <ResizableHandle withHandle />
-
-        {/* Right Panel - AI Copilot */}
-        <ResizablePanel defaultSize={25} minSize={15} maxSize={40} className="border-l border-border bg-card">
+        {/* Right Sidebar - AI Copilot */}
+        <div className="w-80 max-w-[40%] min-w-60 border-l border-border bg-card">
           <div className="h-full overflow-y-auto">
             <div className="p-4 border-b border-border">
               <h2 className="text-sm font-semibold flex items-center gap-2">
@@ -810,8 +846,8 @@ export default function DashboardDetail() {
               </p>
             </div>
           </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </div>
+      </div>
     </div>
   );
 }

@@ -2,13 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { getUserRepos } from '@/utils/getUserRepos';
+import { addRepository } from '@/utils/addRepository';
 import { Card } from '@/components/ui/card';
 import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 export default function Dashboard() {
   const router = useRouter();
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     getUserRepos().then((result) => {
@@ -27,7 +34,50 @@ export default function Dashboard() {
 
   return (
     <div className="container mx-auto px-6 py-20">
-      <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <DialogTrigger asChild>
+            <Button className="h-9 px-4">Add Repository</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add a GitHub repository</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Input
+                placeholder="https://github.com/username/repository"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={async () => {
+                  if (!repoUrl || saving) return;
+                  setSaving(true);
+                  const result = await addRepository(repoUrl);
+                  setSaving(false);
+                  if (result?.error) {
+                    console.error(result.error);
+                    return;
+                  }
+                  // Refresh list
+                  setLoading(true);
+                  const updated = await getUserRepos();
+                  if (!updated.error) setRepos(updated.repos || []);
+                  setLoading(false);
+                  setRepoUrl('');
+                  setIsAddOpen(false);
+                }}
+                disabled={saving}
+              >
+                {saving ? 'Analyzing…' : 'Analyze Repository'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
         {repos.map((repo) => (
           <Card 
