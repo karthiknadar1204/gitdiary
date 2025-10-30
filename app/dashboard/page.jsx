@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { GitBranch, Calendar, ExternalLink, ArrowRight } from 'lucide-react';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -78,25 +79,56 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
       </div>
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         {repos.map((repo) => (
           <Card 
             key={repo.id} 
-            className="p-6 cursor-pointer hover:border-primary/50 transition-colors"
-            onClick={() => router.push(`/dashboard/${repo.id}`)}
+            className="p-4 hover:border-primary/50 transition-colors group"
           >
-            <h2 className="text-xl font-semibold mb-2">{repo.name}</h2>
-            <p className="text-muted-foreground mb-2">Owner: {repo.owner}</p>
-            <p className="text-muted-foreground mb-2">Default Branch: {repo.defaultBranch || 'N/A'}</p>
-            <a 
-              href={repo.url} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {repo.url}
-            </a>
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex-1">
+                <h2 className="text-lg font-semibold mb-1">{repo.name}</h2>
+                <p className="text-xs text-muted-foreground">{repo.owner}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(`/dashboard/${repo.id}`);
+                }}
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            
+            <div className="space-y-2 mb-3">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium">Default:</span>
+                <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{repo.defaultBranch || 'N/A'}</code>
+              </div>
+              
+              {repo.createdAt && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Calendar className="h-3 w-3" />
+                  <span>Added {new Date(repo.createdAt).toLocaleDateString()}</span>
+                </div>
+              )}
+            </div>
+            
+            <div className="pt-3 border-t border-border">
+              <a 
+                href={repo.url} 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-3 w-3" />
+                View on GitHub
+              </a>
+            </div>
           </Card>
         ))}
       </div>

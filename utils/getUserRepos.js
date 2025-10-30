@@ -18,9 +18,16 @@ export async function getUserRepos() {
       return { error: 'User not found' };
     }
 
-    const userRepos = await db.select()
-      .from(repos)
-      .where(eq(repos.userId, user.id));
+    const userRepos = await db.select({
+      id: repos.id,
+      name: repos.name,
+      owner: repos.owner,
+      url: repos.url,
+      defaultBranch: repos.defaultBranch,
+      createdAt: repos.createdAt,
+    })
+    .from(repos)
+    .where(eq(repos.userId, user.id));
 
     return { repos: userRepos };
   } catch (error) {
