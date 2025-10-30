@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
 
-export function AICopilotPanel({ batches = null, width }) {
+export function AICopilotPanel({ batches = null, width, onSubmitPrompt, aiAnalysis = null, loadingAi = false }) {
   const [prompt, setPrompt] = useState("");
   return (
     <div className="max-w-[40%] min-w-60 border-l border-border bg-card" style={{ width }}>
@@ -23,6 +23,15 @@ export function AICopilotPanel({ batches = null, width }) {
           </div>
         ) : (
           <div className="p-4 space-y-3 flex-1 overflow-y-auto">
+            {loadingAi && (
+              <div className="text-center py-4 text-sm text-muted-foreground">Loading analysis...</div>
+            )}
+            {aiAnalysis && (
+              <div className="p-3 border border-border rounded-md bg-background">
+                <div className="text-xs font-semibold mb-2">AI Analysis:</div>
+                <div className="text-xs whitespace-pre-wrap text-muted-foreground">{aiAnalysis}</div>
+              </div>
+            )}
             {batches.map((batch, idx) => (
               <div key={idx} className="border border-border rounded-md p-3 bg-background">
                 <div className="text-xs text-muted-foreground mb-2">
@@ -45,6 +54,12 @@ export function AICopilotPanel({ batches = null, width }) {
           <Input
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && prompt && batches) {
+                onSubmitPrompt(prompt);
+                setPrompt('');
+              }
+            }}
             placeholder="Add a note or prompt..."
           />
         </div>

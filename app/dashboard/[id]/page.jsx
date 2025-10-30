@@ -39,6 +39,8 @@ export default function DashboardDetail() {
   const minLeftWidth = 200;
   const maxLeftWidth = 480;
   const [rightBatches, setRightBatches] = useState(null);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [loadingAi, setLoadingAi] = useState(false);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(320);
   const minRightWidth = 240;
   const maxRightWidth = 560;
@@ -473,6 +475,24 @@ export default function DashboardDetail() {
     setRightBatches(batches);
   };
 
+  const handlePromptSubmit = async (userPrompt) => {
+    if (!rightBatches) return;
+    setLoadingAi(true);
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batches: rightBatches, userPrompt }),
+      });
+      const data = await res.json();
+      setAiAnalysis(data.analysis || data.error || 'No response');
+    } catch (err) {
+      setAiAnalysis('Error calling AI API');
+    } finally {
+      setLoadingAi(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
@@ -583,7 +603,7 @@ export default function DashboardDetail() {
           <div className="absolute inset-y-0 left-0 right-0 bg-border/0 group-hover:bg-border/60 transition-colors" />
         </div>
 
-        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} />
+        <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} onSubmitPrompt={handlePromptSubmit} aiAnalysis={aiAnalysis} loadingAi={loadingAi} />
       </div>
     </div>
   );
