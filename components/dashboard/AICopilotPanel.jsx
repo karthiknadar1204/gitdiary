@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
+import ReactMarkdown from 'react-markdown';
 
 export function AICopilotPanel({ batches = null, width, onSubmitPrompt, conversations = [], loadingAi = false }) {
   const [prompt, setPrompt] = useState("");
@@ -44,7 +45,23 @@ export function AICopilotPanel({ batches = null, width, onSubmitPrompt, conversa
                 {msg.type === 'user' ? (
                   <div className="text-xs text-foreground">{msg.content}</div>
                 ) : (
-                  <div className="text-xs whitespace-pre-wrap">{msg.content}</div>
+                  <div className="text-xs prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown 
+                      components={{
+                        h1: ({ children }) => <h1 className="text-base font-bold mt-2 mb-1">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-sm font-bold mt-2 mb-1">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-xs font-bold mt-2 mb-1">{children}</h3>,
+                        p: ({ children }) => <p className="mb-2">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+                        li: ({ children }) => <li className="mb-1">{children}</li>,
+                        code: ({ children }) => <code className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{children}</code>,
+                        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
                 )}
               </div>
             ))}
