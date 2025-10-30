@@ -39,7 +39,6 @@ export async function fetchBranchesFromGitHub(owner, repoName) {
     let page = 1;
     let hasMore = true;
 
-    // GitHub API paginates results, fetch all pages
     while (hasMore) {
       const response = await fetch(`https://api.github.com/repos/${owner}/${repoName}/branches?page=${page}&per_page=100`, {
         headers: {
@@ -57,7 +56,6 @@ export async function fetchBranchesFromGitHub(owner, repoName) {
       const branchesData = await response.json();
       allBranches = allBranches.concat(branchesData);
 
-      // Check if there are more pages (GitHub sends Link header or empty array)
       const linkHeader = response.headers.get('link');
       if (linkHeader && linkHeader.includes('rel="next"')) {
         page++;
@@ -65,7 +63,6 @@ export async function fetchBranchesFromGitHub(owner, repoName) {
         hasMore = false;
       }
 
-      // If we got fewer than 100 items, we're on the last page
       if (branchesData.length < 100) {
         hasMore = false;
       }
@@ -91,7 +88,6 @@ export async function syncBranches(repoId, owner, repoName) {
       return result;
     }
 
-    // Get existing branches in bulk to avoid individual queries
     const existingBranches = await db.select()
       .from(branches)
       .where(eq(branches.repoId, repoId));
@@ -110,7 +106,6 @@ export async function syncBranches(repoId, owner, repoName) {
 
       const existing = existingMap.get(branch.name);
       if (existing) {
-        // Only update if commit SHA changed
         if (existing.commitSha !== branch.commit.sha) {
           branchesToUpdate.push({
             id: existing.id,
@@ -123,9 +118,7 @@ export async function syncBranches(repoId, owner, repoName) {
       }
     }
 
-    // Batch insert new branches
     if (branchesToInsert.length > 0) {
-      // Split into chunks of 100 for better performance
       const chunkSize = 100;
       for (let i = 0; i < branchesToInsert.length; i += chunkSize) {
         const chunk = branchesToInsert.slice(i, i + chunkSize);
@@ -133,7 +126,6 @@ export async function syncBranches(repoId, owner, repoName) {
       }
     }
 
-    // Batch update existing branches
     if (branchesToUpdate.length > 0) {
       for (const branchUpdate of branchesToUpdate) {
         await db.update(branches)
@@ -142,7 +134,6 @@ export async function syncBranches(repoId, owner, repoName) {
       }
     }
 
-    // Fetch all branches again to return complete list
     const dbBranches = await db.select()
       .from(branches)
       .where(eq(branches.repoId, repoId));

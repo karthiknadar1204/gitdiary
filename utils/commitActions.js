@@ -5,7 +5,7 @@ import { db } from '@/config/db';
 import { commits, pullRequests, issues, commitToPR, commitToBranch, prToIssue, repos } from '@/config/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 
-// Retry helper with exponential backoff
+
 async function fetchWithRetry(url, options, maxRetries = 3, timeout = 30000) {
   let timeoutId;
   
@@ -23,24 +23,20 @@ async function fetchWithRetry(url, options, maxRetries = 3, timeout = 30000) {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        // Don't retry on most client errors (4xx), only retry on server errors (5xx)
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
           const errorText = await response.text().catch(() => '');
           return { error: `HTTP ${response.status}: ${errorText}`, response: null };
         }
         
-        // Retry on 429 (rate limit) and 5xx errors
         if (attempt < maxRetries - 1) {
-          // For rate limiting, wait longer
           if (response.status === 429) {
             const retryAfter = response.headers.get('Retry-After');
             const delay = retryAfter ? parseInt(retryAfter) * 1000 : Math.min(1000 * Math.pow(2, attempt), 10000);
-            await response.text().catch(() => {}); // Consume response body
+            await response.text().catch(() => {});
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
-          // For other 5xx errors, use exponential backoff
-          await response.text().catch(() => {}); // Consume response body
+          await response.text().catch(() => {});
           const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -54,7 +50,6 @@ async function fetchWithRetry(url, options, maxRetries = 3, timeout = 30000) {
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
       
-      // Last attempt
       if (attempt === maxRetries - 1) {
         return { 
           error: error.name === 'AbortError' ? 'Request timeout after 30s' : error.message,
@@ -62,7 +57,6 @@ async function fetchWithRetry(url, options, maxRetries = 3, timeout = 30000) {
         };
       }
 
-      // Exponential backoff: wait 1s, 2s, 4s (max 5s)
       const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
@@ -142,7 +136,6 @@ export async function fetchPRsForCommit(owner, repoName, sha) {
     });
 
     if (result.error) {
-      // 404 means no PRs for this commit, which is fine
       if (result.error.includes('404')) {
         return { prs: [] };
       }
@@ -214,13 +207,12 @@ export async function fetchIssueDetails(owner, repoName, issueNumber) {
   }
 }
 
-// Parse PR body for issue references (#123 format)
 function parseIssueReferences(prBody) {
   if (!prBody) return [];
   const issueRegex = /#(\d+)/g;
   const matches = prBody.matchAll(issueRegex);
   const issueNumbers = [...matches].map(match => parseInt(match[1]));
-  return [...new Set(issueNumbers)]; // Remove duplicates
+  return [...new Set(issueNumbers)];
 }
 
 export async function syncFileCommits(repoId, branchId, owner, repoName, branchName, filePath) {
@@ -230,7 +222,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
       return { error: 'Unauthorized' };
     }
 
-    // Step 1: Get commits for file (Call C)
     const commitsResult = await fetchCommitsForFile(owner, repoName, filePath, branchName);
     if (commitsResult.error) {
       return commitsResult;
@@ -239,11 +230,9 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
     const commitsData = commitsResult.commits || [];
     const processedCommits = [];
 
-    // Step 2: For each commit, get details and PRs
     for (const commitInfo of commitsData) {
       const sha = commitInfo.sha;
 
-      // Check if commit already exists in DB
       const [existingCommit] = await db.select()
         .from(commits)
         .where(eq(commits.sha, sha))
@@ -254,7 +243,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
       if (existingCommit) {
         commitId = existingCommit.id;
       } else {
-        // Step 2a: Get commit details with diffs (Call D)
         const commitDetailsResult = await fetchCommitDetails(owner, repoName, sha);
         if (commitDetailsResult.error) {
           console.error(`Error fetching commit ${sha}:`, commitDetailsResult.error);
@@ -263,17 +251,13 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
 
         const commitData = commitDetailsResult.commit;
 
-        // Extract filesChanged data - store metadata only (no patches to save DB space)
-        // Patches will be fetched on-demand when user expands a commit
         const filesChanged = commitData.files?.map(file => ({
           filename: file.filename,
           additions: file.additions,
           deletions: file.deletions,
           changes: file.changes,
-          // patch: file.patch, // Don't store patch - fetch on-demand when user expands
         })) || [];
 
-        // Store commit in DB
         const [newCommit] = await db.insert(commits).values({
           repoId,
           sha: commitData.sha,
@@ -288,7 +272,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
         commitId = newCommit.id;
       }
 
-      // Link commit to branch
       const [existingLink] = await db.select()
         .from(commitToBranch)
         .where(and(eq(commitToBranch.commitId, commitId), eq(commitToBranch.branchId, branchId)))
@@ -301,18 +284,15 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
         });
       }
 
-      // Step 2b: Get PRs for commit (Call E)
       const prsResult = await fetchPRsForCommit(owner, repoName, sha);
       if (prsResult.error) {
         console.error(`Error fetching PRs for commit ${sha}:`, prsResult.error);
-        // Continue even if PR fetch fails
       } else {
         const prs = prsResult.prs || [];
 
         for (const prInfo of prs) {
           const prNumber = prInfo.number;
 
-          // Check if PR already exists
           const [existingPR] = await db.select()
             .from(pullRequests)
             .where(and(eq(pullRequests.repoId, repoId), eq(pullRequests.number, prNumber)))
@@ -323,7 +303,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
           if (existingPR) {
             prId = existingPR.id;
           } else {
-            // Step 2c: Get PR details (Call F)
             const prDetailsResult = await fetchPRDetails(owner, repoName, prNumber);
             if (prDetailsResult.error) {
               console.error(`Error fetching PR ${prNumber}:`, prDetailsResult.error);
@@ -332,7 +311,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
 
             const prData = prDetailsResult.pr;
 
-            // Store PR in DB
             const [newPR] = await db.insert(pullRequests).values({
               repoId,
               number: prData.number,
@@ -345,10 +323,8 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
 
             prId = newPR.id;
 
-            // Step 2d: Parse PR body for issues (Call G)
             const issueNumbers = parseIssueReferences(prData.body);
             for (const issueNumber of issueNumbers) {
-              // Check if issue already exists
               const [existingIssue] = await db.select()
                 .from(issues)
                 .where(and(eq(issues.repoId, repoId), eq(issues.number, issueNumber)))
@@ -359,7 +335,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
               if (existingIssue) {
                 issueId = existingIssue.id;
               } else {
-                // Fetch issue details
                 const issueDetailsResult = await fetchIssueDetails(owner, repoName, issueNumber);
                 if (issueDetailsResult.error) {
                   console.error(`Error fetching issue ${issueNumber}:`, issueDetailsResult.error);
@@ -368,7 +343,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
 
                 const issueData = issueDetailsResult.issue;
 
-                // Store issue in DB
                 const [newIssue] = await db.insert(issues).values({
                   repoId,
                   number: issueData.number,
@@ -382,7 +356,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
                 issueId = newIssue.id;
               }
 
-              // Link PR to Issue
               const [existingPRIssueLink] = await db.select()
                 .from(prToIssue)
                 .where(and(eq(prToIssue.prId, prId), eq(prToIssue.issueId, issueId)))
@@ -397,7 +370,6 @@ export async function syncFileCommits(repoId, branchId, owner, repoName, branchN
             }
           }
 
-          // Link Commit to PR
           const [existingCommitPRLink] = await db.select()
             .from(commitToPR)
             .where(and(eq(commitToPR.commitId, commitId), eq(commitToPR.prId, prId)))
@@ -432,7 +404,6 @@ export async function getCommitsForFile(repoId, branchId, filePath) {
       return { error: 'Unauthorized' };
     }
 
-    // Get commits linked to this branch
     const branchCommits = await db.select({
       commitId: commitToBranch.commitId,
     })
@@ -445,7 +416,6 @@ export async function getCommitsForFile(repoId, branchId, filePath) {
       return { commits: [] };
     }
 
-    // Get commit details
     const allCommits = await db.select()
       .from(commits)
       .where(and(
@@ -453,7 +423,6 @@ export async function getCommitsForFile(repoId, branchId, filePath) {
         inArray(commits.id, commitIds)
       ));
 
-    // Filter commits that changed this file
     const fileCommits = allCommits.filter(commit => {
       if (!commit.filesChanged || !Array.isArray(commit.filesChanged)) {
         return false;
@@ -461,7 +430,6 @@ export async function getCommitsForFile(repoId, branchId, filePath) {
       return commit.filesChanged.some(file => file.filename === filePath);
     });
 
-    // Sort by date (newest first)
     fileCommits.sort((a, b) => {
       const dateA = a.date ? new Date(a.date).getTime() : 0;
       const dateB = b.date ? new Date(b.date).getTime() : 0;
@@ -482,7 +450,6 @@ export async function getCommitDetailsWithRelations(commitId) {
       return { error: 'Unauthorized' };
     }
 
-    // Get commit
     const [commit] = await db.select()
       .from(commits)
       .where(eq(commits.id, commitId))
@@ -492,14 +459,12 @@ export async function getCommitDetailsWithRelations(commitId) {
       return { error: 'Commit not found' };
     }
 
-    // Check if we need to fetch patches (if filesChanged exists but has no patches)
     let filesChangedWithPatches = commit.filesChanged;
     const needsPatches = commit.filesChanged && Array.isArray(commit.filesChanged) && 
       commit.filesChanged.length > 0 && 
       commit.filesChanged.some(file => !file.patch);
 
     if (needsPatches) {
-      // Fetch commit details from GitHub to get patches
       const repo = await db.select()
         .from(repos)
         .where(eq(repos.id, commit.repoId))
@@ -510,7 +475,6 @@ export async function getCommitDetailsWithRelations(commitId) {
         const commitDetailsResult = await fetchCommitDetails(repoData.owner, repoData.name, commit.sha);
         
         if (!commitDetailsResult.error && commitDetailsResult.commit) {
-          // Merge patches into existing filesChanged data
           const patchMap = new Map();
           commitDetailsResult.commit.files?.forEach(file => {
             patchMap.set(file.filename, file.patch);
@@ -518,10 +482,9 @@ export async function getCommitDetailsWithRelations(commitId) {
 
           filesChangedWithPatches = commit.filesChanged.map(file => ({
             ...file,
-            patch: patchMap.get(file.filename) || file.patch || null, // Add patch if available
+            patch: patchMap.get(file.filename) || file.patch || null,
           }));
 
-          // Update DB with patches (cache for future use)
           await db.update(commits)
             .set({ filesChanged: filesChangedWithPatches })
             .where(eq(commits.id, commitId));
@@ -529,7 +492,6 @@ export async function getCommitDetailsWithRelations(commitId) {
       }
     }
 
-    // Get PRs linked to this commit
     const commitPRs = await db.select({
       prId: commitToPR.prId,
     })
@@ -544,7 +506,6 @@ export async function getCommitDetailsWithRelations(commitId) {
         .from(pullRequests)
         .where(inArray(pullRequests.id, prIds));
 
-      // For each PR, get linked issues
       for (const pr of prsData) {
         const prIssues = await db.select({
           issueId: prToIssue.issueId,
@@ -571,7 +532,7 @@ export async function getCommitDetailsWithRelations(commitId) {
     return {
       commit: {
         ...commit,
-        filesChanged: filesChangedWithPatches, // Use patches if fetched
+        filesChanged: filesChangedWithPatches,
         prs,
       },
     };
