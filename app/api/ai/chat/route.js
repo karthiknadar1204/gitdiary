@@ -5,7 +5,7 @@ import { getOpenAI } from '@/utils/ai/openai';
 
 export async function POST(req) {
     try {
-        const { batches, userPrompt } = await req.json();
+        const { batches, userPrompt, conversationHistory = [] } = await req.json();
 
         if (!batches || batches.length === 0) {
             return NextResponse.json({ error: 'No commits selected' }, { status: 400 });
@@ -45,12 +45,16 @@ Tone:
 Here are the commits:
 ${JSON.stringify(batches, null, 2)}`;
 
+    // Build messages array: system prompt, conversation history (last 5), and new user message
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...conversationHistory, // Last 5 messages from previous conversation
+      { role: 'user', content: userContent },
+    ];
+
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
+      messages,
       temperature: 0.7,
       stream: true,
     });

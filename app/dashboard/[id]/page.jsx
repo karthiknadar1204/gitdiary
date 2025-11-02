@@ -11,6 +11,16 @@ import FilesSidebar from '@/components/dashboard/FilesSidebar';
 import CommitContent from '@/components/dashboard/CommitContent';
 import AICopilotPanel from '@/components/dashboard/AICopilotPanel';
 import { buildLlmBatches } from '@/utils/llmPrep';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function DashboardDetail() {
   const params = useParams();
@@ -48,6 +58,9 @@ export default function DashboardDetail() {
   const minRightWidth = 240;
   const maxRightWidth = 560;
   const [isResizingRight, setIsResizingRight] = useState(false);
+  const [showContextChangeDialog, setShowContextChangeDialog] = useState(false);
+  const [pendingBatches, setPendingBatches] = useState(null);
+  const previousBatchesRef = useRef(null);
 
   useEffect(() => {
     function onMouseMove(e) {
@@ -414,6 +427,33 @@ export default function DashboardDetail() {
     }
   };
 
+  // Helper function to compare batches for context change detection
+  const areBatchesDifferent = (oldBatches, newBatches) => {
+    if (!oldBatches && !newBatches) return false;
+    if (!oldBatches || !newBatches) return true;
+    if (oldBatches.length !== newBatches.length) return true;
+    
+    // Compare first and last commits as a quick check
+    const getFirstSha = (batches) => {
+      if (!batches || batches.length === 0 || !batches[0].payload || batches[0].payload.length === 0) return null;
+      return batches[0].payload[0].sha;
+    };
+    
+    const getLastSha = (batches) => {
+      if (!batches || batches.length === 0) return null;
+      const lastBatch = batches[batches.length - 1];
+      if (!lastBatch.payload || lastBatch.payload.length === 0) return null;
+      return lastBatch.payload[lastBatch.payload.length - 1].sha;
+    };
+    
+    const oldFirst = getFirstSha(oldBatches);
+    const newFirst = getFirstSha(newBatches);
+    const oldLast = getLastSha(oldBatches);
+    const newLast = getLastSha(newBatches);
+    
+    return oldFirst !== newFirst || oldLast !== newLast;
+  };
+
   const handleSubmitSelection = async () => {
     const commitIdSet = new Set(selectedCommitIds);
     const needDetails = Array.from(commitIdSet).filter(id => !commitDetails[id]);
@@ -482,7 +522,43 @@ export default function DashboardDetail() {
     const batches = await buildLlmBatches({ commitsDetailed: detailed });
     // eslint-disable-next-line no-console
     console.log('LLM batches:', batches);
-    setRightBatches(batches);
+    
+    // Check if context has changed and there are existing conversations
+    const hasConversations = conversations.length > 0;
+    const contextChanged = areBatchesDifferent(rightBatches, batches);
+    
+    if (hasConversations && contextChanged) {
+      // Store new batches as pending and show confirmation dialog
+      setPendingBatches(batches);
+      setShowContextChangeDialog(true);
+    } else {
+      // No conversation history or same context - update directly
+      setRightBatches(batches);
+      if (batches) {
+        previousBatchesRef.current = batches;
+      }
+    }
+  };
+  
+  const handleConfirmContextChange = () => {
+    if (pendingBatches && pendingBatches.length > 0) {
+      // Create a new array reference to ensure React detects the change
+      const newBatches = [...pendingBatches];
+      setRightBatches(newBatches);
+      previousBatchesRef.current = newBatches;
+      setPendingBatches(null);
+    } else if (pendingBatches !== null) {
+      // Handle case where pendingBatches is empty array
+      setRightBatches(pendingBatches);
+      previousBatchesRef.current = pendingBatches;
+      setPendingBatches(null);
+    }
+    setShowContextChangeDialog(false);
+  };
+  
+  const handleCancelContextChange = () => {
+    setPendingBatches(null);
+    setShowContextChangeDialog(false);
   };
 
   const handlePromptSubmit = async (userPrompt) => {
@@ -492,10 +568,39 @@ export default function DashboardDetail() {
     setLoadingAi(true);
     let streamedText = '';
     try {
+      // Extract last 5 message pairs (10 items: 5 user + 5 ai) from conversations
+      // We're using the conversations state BEFORE the new message was added
+      // Exclude empty/incomplete messages
+      const validConversations = conversations.filter(msg => msg.content && msg.content.trim() !== '');
+      
+      // Ensure we have complete pairs (user, ai, user, ai...) - get last 10 items
+      // If we have odd number or last is user type, take one less to ensure complete pairs
+      let last5Messages = validConversations.slice(-10);
+      if (last5Messages.length > 0 && last5Messages[last5Messages.length - 1].type === 'user') {
+        // Last message is user (incomplete pair), remove it
+        last5Messages = last5Messages.slice(0, -1);
+      }
+      // If odd number of messages, remove the first to ensure pairs
+      if (last5Messages.length % 2 !== 0) {
+        last5Messages = last5Messages.slice(1);
+      }
+      // Take only last 10 (5 pairs) if we have more
+      last5Messages = last5Messages.slice(-10);
+      
+      // Format conversation history for API (convert to OpenAI format)
+      const conversationHistory = last5Messages.map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'assistant',
+        content: msg.content,
+      }));
+      
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batches: rightBatches, userPrompt }),
+        body: JSON.stringify({ 
+          batches: rightBatches, 
+          userPrompt,
+          conversationHistory,
+        }),
       });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -535,6 +640,7 @@ export default function DashboardDetail() {
 
   const handleClearSelections = () => {
     setRightBatches(null);
+    previousBatchesRef.current = null;
     setConversations([]);
     setSelectedCommitIds(new Set());
     setSelectedCommitFiles(new Map());
@@ -653,6 +759,22 @@ export default function DashboardDetail() {
 
         <AICopilotPanel batches={rightBatches} width={rightSidebarWidth} onSubmitPrompt={handlePromptSubmit} conversations={conversations} loadingAi={loadingAi} onClearSelections={handleClearSelections} />
       </div>
+
+      {/* Context Change Confirmation Dialog */}
+      <AlertDialog open={showContextChangeDialog} onOpenChange={setShowContextChangeDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change Context?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to change the context? Your current conversation will continue with the new context.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelContextChange}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmContextChange}>Yes, Change Context</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
